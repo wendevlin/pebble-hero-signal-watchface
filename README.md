@@ -25,8 +25,9 @@ from your phone without noticing.
 - **Plus a Home Assistant temperature**, shown next to it as `12°/21°`
   (outside / Home Assistant). Log in from the settings page with your Home
   Assistant username and password (plus two-factor code if you use it; no
-  long-lived token to paste) and pick a `weather.*` entity or any temperature
-  sensor, e.g. your living room.
+  long-lived token to paste). Then pick a `weather.*` entity or any temperature
+  sensor, e.g. your living room, from a searchable bottom sheet grouped like
+  Home Assistant: floor › area › device, with the current value.
 - **Power meter:** today's steps against your goal; turns green when you hit it.
 - **Energy meter:** battery level (the bolt turns green while charging).
 - **Five cities**, picked from previews in the settings: Vienna (signal from the

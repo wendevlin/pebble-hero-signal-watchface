@@ -31,10 +31,13 @@ import {
 import {
   defaultTempEntity,
   parseHaTemp,
+  parseTempEntityTemplate,
+  tempEntityTemplate,
   parseOpenMeteo,
   tempEntitiesFromStates,
   type HaStateObject,
   type TempEntity,
+  type TempEntityList,
   type WeatherReading,
 } from "./weather";
 
@@ -244,7 +247,7 @@ function haConnected(): boolean {
 }
 
 function clearHa(): void {
-  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities", "haError"].forEach(function (k) {
+  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities", "haFloors", "haError"].forEach(function (k) {
     localStorage.removeItem(k);
   });
 }
@@ -315,17 +318,58 @@ function haGet(path: string, cb: (data: unknown) => void): void {
   });
 }
 
-function fetchHaEntities(cb: (list: TempEntity[]) => void): void {
-  haGet("/api/states", function (states) {
-    // Keep the cached list when Home Assistant is unreachable.
-    if (!Array.isArray(states)) {
-      cb(cachedEntities());
+/** POST a template to Home Assistant; calls back with the rendered text, or null. */
+function haTemplate(template: string, cb: (text: string | null) => void): void {
+  const url = localStorage.getItem("haUrl") || "";
+  withHaToken(function (token) {
+    if (!url || !token) {
+      cb(null);
       return;
     }
-    const list = tempEntitiesFromStates(states);
-    localStorage.setItem("haEntities", JSON.stringify(list));
-    cb(list);
+    request(
+      "POST",
+      url + "/api/template",
+      { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      JSON.stringify({ template: template }),
+      function (status, text) {
+        cb(status === 200 ? text : null);
+      },
+    );
   });
+}
+
+/**
+ * The picker's entity list (weather entities and temperature sensors with
+ * floor, area, device and value), cached for the settings page. Falls back to
+ * a template without floors (Home Assistant before 2024.4), then to plain
+ * /api/states without any location.
+ */
+function fetchHaEntities(cb: (list: TempEntity[]) => void): void {
+  const done = function (result: TempEntityList | null) {
+    if (!result) {
+      cb(cachedEntities());  // Home Assistant unreachable: keep what we had
+      return;
+    }
+    localStorage.setItem("haEntities", JSON.stringify(result.entities));
+    localStorage.setItem("haFloors", JSON.stringify(result.floors));
+    cb(result.entities);
+  };
+  haTemplate(tempEntityTemplate(true), function (text) {
+    const full = text === null ? null : parseTempEntityTemplate(text);
+    if (full) return done(full);
+    haTemplate(tempEntityTemplate(false), function (text2) {
+      const noFloors = text2 === null ? null : parseTempEntityTemplate(text2);
+      if (noFloors) return done(noFloors);
+      haGet("/api/states", function (states) {
+        done(Array.isArray(states) ? { entities: tempEntitiesFromStates(states), floors: [] } : null);
+      });
+    });
+  });
+}
+
+function cachedFloors(): string[] {
+  const list = parseJson(localStorage.getItem("haFloors") || "[]");
+  return Array.isArray(list) ? (list as string[]) : [];
 }
 
 function haTempActive(): boolean {
@@ -370,6 +414,7 @@ function openConfig(): void {
       user: localStorage.getItem("haLastUser") || "",
       entity: s.haEntity,
       entities: cachedEntities(),
+      floors: cachedFloors(),
       // Shown once: the outcome of the last login attempt.
       error: localStorage.getItem("haError") || "",
       justConnected: localStorage.getItem("haJustConnected") === "1",

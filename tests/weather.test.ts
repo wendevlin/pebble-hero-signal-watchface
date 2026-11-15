@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   Cond,
   defaultTempEntity,
+  parseTempEntityTemplate,
+  tempEntityTemplate,
   parseHaTemp,
   parseOpenMeteo,
   tempEntitiesFromStates,
@@ -78,13 +80,38 @@ describe("parsers", () => {
       { entity_id: "light.x", attributes: {} },
     ];
     const list = tempEntitiesFromStates(states);
-    expect(list).toEqual([
-      { entity_id: "weather.home", name: "Home", kind: "weather" },
-      { entity_id: "sensor.attic", name: "Attic", kind: "sensor" },
-      { entity_id: "sensor.kitchen", name: "Kitchen", kind: "sensor" },
+    expect(list.map((e) => [e.entity_id, e.name, e.kind])).toEqual([
+      ["weather.home", "Home", "weather"],
+      ["sensor.attic", "Attic", "sensor"],
+      ["sensor.kitchen", "Kitchen", "sensor"],
     ]);
     expect(defaultTempEntity(list)).toBe("weather.home");
     expect(defaultTempEntity([])).toBe("");
     expect(tempEntitiesFromStates({})).toEqual([]);
+  });
+
+  test("entity template: floors only when asked for", () => {
+    expect(tempEntityTemplate(true)).toContain("floor_name(s.entity_id)");
+    expect(tempEntityTemplate(true)).toContain("floors() | map('floor_name')");
+    expect(tempEntityTemplate(false)).not.toContain("floor_name");
+  });
+
+  test("parses the rendered entity template", () => {
+    const rendered = JSON.stringify({
+      floors: ["Ground floor", "First floor"],
+      items: [
+        { e: "sensor.kitchen", n: "Kitchen", k: "sensor", v: "23.1", u: "°C", a: "Kitchen", f: "Ground floor", d: null },
+        { e: "weather.home", n: "Forecast Home", k: "weather", v: 14.2, u: "°C", a: null, f: null, d: "Met.no" },
+      ],
+    });
+    expect(parseTempEntityTemplate(rendered)).toEqual({
+      floors: ["Ground floor", "First floor"],
+      entities: [
+        { entity_id: "weather.home", name: "Forecast Home", kind: "weather", state: "14.2", unit: "°C", floor: "", area: "", device: "Met.no" },
+        { entity_id: "sensor.kitchen", name: "Kitchen", kind: "sensor", state: "23.1", unit: "°C", floor: "Ground floor", area: "Kitchen", device: "" },
+      ],
+    });
+    expect(parseTempEntityTemplate("not json")).toBeNull();
+    expect(parseTempEntityTemplate("{}")).toBeNull();
   });
 });

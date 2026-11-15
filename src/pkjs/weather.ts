@@ -91,6 +91,85 @@ export interface TempEntity {
   entity_id: string;
   name: string;
   kind: "weather" | "sensor";
+  /** Current value and unit, for the picker (HA converts to the instance's unit system). */
+  state?: string;
+  unit?: string;
+  /** Where it is, as in Home Assistant: floor > area > device. Empty when unassigned. */
+  floor?: string;
+  area?: string;
+  device?: string;
+}
+
+/**
+ * Jinja template for POST /api/template that lists every weather entity and
+ * temperature sensor with its value, floor, area and device, plus the floors
+ * in Home Assistant's order. `withFloors` false drops the floor functions,
+ * for Home Assistant versions before floors existed (2024.4).
+ */
+export function tempEntityTemplate(withFloors: boolean): string {
+  const floor = withFloors ? ", 'f': floor_name(s.entity_id)" : "";
+  const item = function (kind: string, value: string, unit: string): string {
+    return (
+      "{%- set dev = device_id(s.entity_id) -%}" +
+      "{%- set ns.items = ns.items + [{'e': s.entity_id, 'n': s.name, 'k': '" + kind + "', " +
+      "'v': " + value + ", 'u': " + unit + ", 'a': area_name(s.entity_id)" + floor + ", " +
+      "'d': (device_attr(dev, 'name_by_user') or device_attr(dev, 'name')) if dev else none}] -%}"
+    );
+  };
+  return (
+    "{%- set ns = namespace(items=[]) -%}" +
+    "{%- for s in states.weather -%}" +
+    item("weather", "s.attributes.temperature", "s.attributes.temperature_unit") +
+    "{%- endfor -%}" +
+    "{%- for s in states.sensor if s.attributes.device_class == 'temperature' -%}" +
+    item("sensor", "s.state", "s.attributes.unit_of_measurement") +
+    "{%- endfor -%}" +
+    "{{ {'items': ns.items, 'floors': " + (withFloors ? "floors() | map('floor_name') | list" : "[]") +
+    "} | tojson }}"
+  );
+}
+
+export interface TempEntityList {
+  entities: TempEntity[];
+  floors: string[];
+}
+
+function str(v: unknown): string {
+  return v === null || v === undefined ? "" : String(v);
+}
+
+/** Parse the rendered tempEntityTemplate; null when it isn't that. */
+export function parseTempEntityTemplate(text: string): TempEntityList | null {
+  let data: { items?: unknown; floors?: unknown };
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+  if (!data || !Array.isArray(data.items)) return null;
+  const entities: TempEntity[] = [];
+  for (const raw of data.items as { [k: string]: unknown }[]) {
+    const id = str(raw && raw.e);
+    if (!id) continue;
+    entities.push({
+      entity_id: id,
+      name: str(raw.n) || id,
+      kind: raw.k === "weather" ? "weather" : "sensor",
+      state: str(raw.v),
+      unit: str(raw.u),
+      floor: str(raw.f),
+      area: str(raw.a),
+      device: str(raw.d),
+    });
+  }
+  return { entities: sortTempEntities(entities), floors: Array.isArray(data.floors) ? (data.floors as unknown[]).map(str) : [] };
+}
+
+function sortTempEntities(list: TempEntity[]): TempEntity[] {
+  return list.sort(function (a, b) {
+    if (a.kind !== b.kind) return a.kind === "weather" ? -1 : 1;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
 }
 
 /** `weather.*` entities and temperature sensors from GET /api/states. */
@@ -104,13 +183,15 @@ export function tempEntitiesFromStates(states: unknown): TempEntity[] {
     if (id.indexOf("weather.") === 0) kind = "weather";
     else if (id.indexOf("sensor.") === 0 && attrs.device_class === "temperature") kind = "sensor";
     if (!kind) continue;
-    out.push({ entity_id: id, name: attrs.friendly_name || id, kind: kind });
+    out.push({
+      entity_id: id,
+      name: attrs.friendly_name || id,
+      kind: kind,
+      state: kind === "weather" ? str(attrs.temperature) : str(s.state),
+      unit: kind === "weather" ? str(attrs.temperature_unit) : str(attrs.unit_of_measurement),
+    });
   }
-  out.sort(function (a, b) {
-    if (a.kind !== b.kind) return a.kind === "weather" ? -1 : 1;
-    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
-  });
-  return out;
+  return sortTempEntities(out);
 }
 
 /** The entity to pre-select after logging in: a weather entity if there is one. */

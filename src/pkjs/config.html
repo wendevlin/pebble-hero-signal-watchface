@@ -95,6 +95,16 @@
   #haLogin label .hint { font-weight: normal; }
   input[type=text], input[type=password] { width: 100%; padding: 10px; font-size: 16px; border: 3px solid var(--ink); background: #fff; border-radius: 0; }
 
+  .status.ok { color: #127a2e; }
+  .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 10; }
+  .modal.hidden { display: none; }
+  .modal-box { background: var(--paper); border: 3px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); padding: 16px 18px; width: 100%; max-width: 360px; }
+  .modal-box h2 { font-size: 28px; margin: 0 0 8px; }
+  .modal-box p { line-height: 1.45; margin: 8px 0; word-break: break-word; }
+  .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+  .btn.plain { background: #fff; color: var(--ink); }
+  .spinner { width: 34px; height: 34px; border: 5px solid var(--yellow); border-top-color: var(--ink); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 10px auto; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -152,9 +162,10 @@
       <label for="haMfa">Two-factor code <span class="hint">(only if you use it)</span></label>
       <input type="text" id="haMfa" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
       <p><button class="btn small" id="haConnect" type="button">Connect</button></p>
-      <p class="hint">Your password goes straight to your Home Assistant and isn't stored; the watchface keeps a login token like any HA app. Settings close while the phone logs in; open them again to see the connection and pick a sensor.</p>
+      <p class="hint">Your password goes straight to your Home Assistant and isn't stored; the watchface keeps a login token like any HA app.</p>
     </div>
     <p class="status error hidden" id="haError"></p>
+    <p class="status ok hidden" id="haOk"></p>
     </div>
   </div>
 
@@ -168,6 +179,15 @@
   </div>
 
   <button class="btn save" id="save" type="button">Save!</button>
+
+  <div class="modal hidden" id="modal" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <h2 id="modalTitle"></h2>
+      <div class="spinner hidden" id="modalSpinner"></div>
+      <p id="modalText"></p>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
 
 <script>
 (function () {
@@ -193,6 +213,10 @@
   if (config.ha.error) {
     $('haError').textContent = config.ha.error;
     $('haError').classList.remove('hidden');
+  }
+  if (config.ha.justConnected && config.ha.connected) {
+    $('haOk').textContent = 'Connected! Pick the sensor below and save.';
+    $('haOk').classList.remove('hidden');
   }
 
   var select = $('haEntity');
@@ -249,8 +273,54 @@
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
     return url.replace(/\/+$/, '');
   }
-  // The phone logs in through Home Assistant's login API (src/pkjs/ha.ts):
-  // HA's own login page can't run inside the Pebble app.
+  // --- Dialog ------------------------------------------------------------
+  function modal(title, text, buttons, busy) {
+    $('modalTitle').textContent = title;
+    $('modalText').textContent = text;
+    $('modalSpinner').classList.toggle('hidden', !busy);
+    var actions = $('modalActions');
+    actions.innerHTML = '';
+    (buttons || []).forEach(function (b) {
+      var el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'btn small' + (b.plain ? ' plain' : '');
+      el.textContent = b.label;
+      el.addEventListener('click', b.onClick);
+      actions.appendChild(el);
+    });
+    $('modal').classList.remove('hidden');
+  }
+  function hideModal() { $('modal').classList.add('hidden'); }
+
+  // Is there a Home Assistant at `url`? Its /auth/token endpoint is the only
+  // one HA opens to other pages (CORS), and it answers an unknown grant type
+  // with a well-known error. The login itself (login_flow) is not open to
+  // pages, so the phone does it after the settings close (src/pkjs/ha.ts).
+  function checkHomeAssistant(url, cb) {
+    var finished = false;
+    function finish(ok, why) { if (!finished) { finished = true; cb(ok, why); } }
+    setTimeout(function () { finish(false, 'no answer within 10 seconds'); }, 10000);
+    try {
+      fetch(url + '/auth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=hero_signal_check'
+      }).then(function (res) {
+        return res.json().then(function (body) {
+          finish(!!body && typeof body.error === 'string', 'unexpected answer (' + res.status + ')');
+        }, function () { finish(false, 'not a Home Assistant answer (' + res.status + ')'); });
+      }, function () { finish(false, 'no connection'); });
+    } catch (e) {
+      finish(false, 'no connection');
+    }
+  }
+
+  function loginAndClose(url, user, pass) {
+    modal('Logging in…', 'Closing the settings: the phone logs in to Home Assistant now.', [], true);
+    close({ action: 'ha_login', url: url, username: user, password: pass,
+            mfa: $('haMfa').value.replace(/\s+/g, ''), settings: settings() });
+  }
+
   $('haConnect').addEventListener('click', function () {
     var url = normalizeUrl($('haUrl').value);
     var user = $('haUser').value.trim();
@@ -258,9 +328,25 @@
     if (!url) { $('haUrl').focus(); return; }
     if (!user) { $('haUser').focus(); return; }
     if (!pass) { $('haPass').focus(); return; }
-    close({ action: 'ha_login', url: url, username: user, password: pass,
-            mfa: $('haMfa').value.replace(/\s+/g, ''), settings: settings() });
+    modal('Connecting…', 'Looking for Home Assistant at ' + url, [], true);
+    checkHomeAssistant(url, function (ok, why) {
+      if (ok) {
+        modal('Home Assistant found!',
+          'Save & close to log in as ' + user + '. The watch shows the Home Assistant temperature once ' +
+          'the login worked; if it didn\'t, the reason is shown here next time.',
+          [{ label: 'Back', plain: true, onClick: hideModal },
+           { label: 'Save & close', onClick: function () { loginAndClose(url, user, pass); } }]);
+      } else {
+        modal('Can\'t reach Home Assistant',
+          url + ': ' + why + '. Check the address (http:// or https://, port), that the phone is on the ' +
+          'home Wi-Fi for a local address, or use your Nabu Casa address. Local addresses can\'t always be ' +
+          'checked from the settings page, so you can still try.',
+          [{ label: 'Back', plain: true, onClick: hideModal },
+           { label: 'Try anyway & close', onClick: function () { loginAndClose(url, user, pass); } }]);
+      }
+    });
   });
+
   $('save').addEventListener('click', function () {
     close({ action: 'save', settings: settings(), haDisconnect: disconnectRequested });
   });

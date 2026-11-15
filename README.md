@@ -121,6 +121,14 @@ through HA's login-flow API (`/auth/login_flow`, the same API HA's login page
 uses) and trades the resulting code for regular OAuth access and refresh
 tokens. The password only goes to Home Assistant and is never stored.
 
+The settings page can't run that login itself: Home Assistant only opens
+`/auth/token` to other pages (CORS), not `/auth/login_flow`. So on Connect the
+page first checks that a Home Assistant answers at the address (via
+`/auth/token`), shows "found" or "can't reach" in a dialog, and only then
+closes with Save & close. After the login, the phone reopens the settings with
+the outcome. If the Pebble app ignores that, the outcome is shown the next
+time the settings open.
+
 ### Phone permissions
 
 Built with SDK 4.44, the app uses manifest v2: the Pebble app only lets

@@ -358,11 +358,13 @@ function openConfig(): void {
       user: localStorage.getItem("haLastUser") || "",
       entity: s.haEntity,
       entities: cachedEntities(),
-      // Shown once: why the last login attempt failed.
+      // Shown once: the outcome of the last login attempt.
       error: localStorage.getItem("haError") || "",
+      justConnected: localStorage.getItem("haJustConnected") === "1",
     },
   };
   localStorage.removeItem("haError");
+  localStorage.removeItem("haJustConnected");
   const html = CONFIG_HTML.replace("__CONFIG__", JSON.stringify(config));
   Pebble.openURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
@@ -370,6 +372,20 @@ function openConfig(): void {
 function haLoginFailed(url: string, message: string): void {
   console.log(LOG + "Home Assistant login failed: " + message);
   localStorage.setItem("haError", "Couldn't log in to " + url + ": " + message + ".");
+  showLoginOutcome();
+}
+
+/**
+ * Bring the settings back with the login outcome. The Pebble app may ignore a
+ * page opened by PebbleKit JS after the settings closed; then the outcome is
+ * shown the next time the settings open (it's kept until then).
+ */
+function showLoginOutcome(): void {
+  try {
+    openConfig();
+  } catch (e) {
+    console.log(LOG + "could not reopen the settings: " + e);
+  }
 }
 
 /** POST JSON to a login-flow URL and interpret the answer. */
@@ -436,7 +452,9 @@ function exchangeHaCode(url: string, code: string): void {
         if (!s.haEntity) s.haEntity = defaultTempEntity(list);
         saveSettings(s);
         console.log(LOG + "Home Assistant connected, " + list.length + " entities");
+        localStorage.setItem("haJustConnected", "1");
         refreshWeather();
+        showLoginOutcome();
       });
     },
   );

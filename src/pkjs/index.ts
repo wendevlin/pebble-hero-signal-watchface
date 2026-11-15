@@ -1,0 +1,453 @@
+/*
+ * Phone-side PebbleKit JS for Hero Signal.
+ *
+ * - Settings page (src/pkjs/config.html) and pushing the settings to the watch.
+ * - Weather, from the phone's location via Open-Meteo (no API key) or from a
+ *   Home Assistant `weather.*` entity. Home Assistant falls back to Open-Meteo
+ *   when it can't be reached, so the watch never shows stale weather for long.
+ *
+ * The WATCH drives the refresh cadence (it sends REFRESH every 30 minutes and
+ * whenever the phone reconnects): phone-side timers stall while the Pebble app
+ * is in the background, but an inbound AppMessage always wakes it.
+ *
+ * Authored in TypeScript, bundled to src/pkjs/index.js by `bun run build:pkjs`.
+ * Plain `function`s and no `?.`/`??` on purpose: the bundle is not down-levelled
+ * and must run in the Pebble app's JS runtime.
+ */
+
+import CONFIG_PAGE from "./config.html" with { type: "text" };
+import {
+  HA_CLIENT_ID,
+  HA_REDIRECT_URI,
+  buildAuthorizeUrl,
+  decodeState,
+  encodeState,
+  normalizeHaUrl,
+  tokenExchangeBody,
+  tokenRefreshBody,
+} from "./ha";
+import {
+  parseHaWeather,
+  parseOpenMeteo,
+  weatherEntitiesFromStates,
+  type HaStateObject,
+  type WeatherEntity,
+  type WeatherReading,
+} from "./weather";
+
+// A text import yields the file as a string at runtime; bun's typings declare
+// *.html imports as HTML bundles, hence the cast.
+const CONFIG_HTML = CONFIG_PAGE as unknown as string;
+
+const LOG = "Hero Signal: ";
+const POSITION_MAX_AGE_MS = 30 * 60 * 1000;
+
+// --- Settings -----------------------------------------------------------------
+
+interface Settings {
+  hero: number;
+  fahrenheit: boolean;
+  stepGoal: number;
+  vibe: boolean;
+  source: "location" | "ha";
+  haEntity: string;
+}
+
+const DEFAULTS: Settings = {
+  hero: 0,
+  fahrenheit: false,
+  stepGoal: 8000,
+  vibe: true,
+  source: "location",
+  haEntity: "",
+};
+
+function loadSettings(): Settings {
+  const out: Settings = {
+    hero: DEFAULTS.hero,
+    fahrenheit: DEFAULTS.fahrenheit,
+    stepGoal: DEFAULTS.stepGoal,
+    vibe: DEFAULTS.vibe,
+    source: DEFAULTS.source,
+    haEntity: DEFAULTS.haEntity,
+  };
+  try {
+    const raw = JSON.parse(localStorage.getItem("settings") || "{}");
+    return sanitize(raw, out);
+  } catch (e) {
+    return out;
+  }
+}
+
+function sanitize(raw: Partial<Settings>, base: Settings): Settings {
+  const hero = Number(raw.hero);
+  const goal = Number(raw.stepGoal);
+  return {
+    hero: hero >= 0 && hero <= 3 ? Math.floor(hero) : base.hero,
+    fahrenheit: typeof raw.fahrenheit === "boolean" ? raw.fahrenheit : base.fahrenheit,
+    stepGoal: goal >= 500 && goal <= 100000 ? Math.floor(goal) : base.stepGoal,
+    vibe: typeof raw.vibe === "boolean" ? raw.vibe : base.vibe,
+    source: raw.source === "ha" ? "ha" : raw.source === "location" ? "location" : base.source,
+    haEntity: typeof raw.haEntity === "string" ? raw.haEntity : base.haEntity,
+  };
+}
+
+function saveSettings(s: Settings): void {
+  localStorage.setItem("settings", JSON.stringify(s));
+}
+
+// --- Outbound AppMessages, one at a time -------------------------------------
+// A second message sent before the watch acked the first can be dropped, so
+// messages are queued and each waits for the previous ack/nack (or a timeout).
+
+interface Outbound {
+  label: string;
+  message: { [key: string]: number | string };
+}
+const outbox: Outbound[] = [];
+let outboxBusy = false;
+
+function pumpOutbox(): void {
+  if (outboxBusy) return;
+  const next = outbox.shift();
+  if (!next) return;
+  outboxBusy = true;
+  let finished = false;
+  const done = function () {
+    if (finished) return;
+    finished = true;
+    outboxBusy = false;
+    pumpOutbox();
+  };
+  setTimeout(function () {
+    if (!finished) console.log(LOG + "no ack for " + next.label);
+    done();
+  }, 10000);
+  Pebble.sendAppMessage(next.message, done, function (e) {
+    console.log(LOG + "failed to send " + next.label + ": " + JSON.stringify(e));
+    done();
+  });
+}
+
+function send(label: string, message: { [key: string]: number | string }): void {
+  outbox.push({ label: label, message: message });
+  pumpOutbox();
+}
+
+function sendSettings(): void {
+  const s = loadSettings();
+  send("settings", {
+    HERO_COLOR: s.hero,
+    FAHRENHEIT: s.fahrenheit ? 1 : 0,
+    STEP_GOAL: s.stepGoal,
+    VIBE_DISCONNECT: s.vibe ? 1 : 0,
+  });
+}
+
+function sendWeather(w: WeatherReading, source: string): void {
+  console.log(LOG + source + " weather " + w.tenthsC / 10 + "°C cond " + w.cond + " day " + w.isDay);
+  send("weather", { WEATHER_TEMP: w.tenthsC, WEATHER_COND: w.cond, IS_DAY: w.isDay ? 1 : 0 });
+}
+
+// --- HTTP ---------------------------------------------------------------------
+
+function request(
+  method: string,
+  url: string,
+  headers: { [k: string]: string },
+  body: string | null,
+  cb: (status: number, text: string) => void,
+): void {
+  const xhr = new XMLHttpRequest();
+  xhr.open(method, url, true);
+  for (const k in headers) xhr.setRequestHeader(k, headers[k]);
+  xhr.timeout = 20000;
+  xhr.onload = function () {
+    cb(xhr.status, xhr.responseText);
+  };
+  xhr.onerror = function () {
+    cb(0, "");
+  };
+  xhr.ontimeout = function () {
+    cb(0, "");
+  };
+  xhr.send(body);
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+}
+
+// --- Weather: phone location (Open-Meteo) ------------------------------------
+
+function fetchLocationWeather(): void {
+  navigator.geolocation.getCurrentPosition(
+    function (pos) {
+      localStorage.setItem("lastLat", String(pos.coords.latitude));
+      localStorage.setItem("lastLon", String(pos.coords.longitude));
+      fetchOpenMeteo(pos.coords.latitude, pos.coords.longitude);
+    },
+    function (err) {
+      // In the background the phone often refuses a fresh fix; the last one is
+      // plenty accurate for weather.
+      const lat = parseFloat(localStorage.getItem("lastLat") || "");
+      const lon = parseFloat(localStorage.getItem("lastLon") || "");
+      if (isFinite(lat) && isFinite(lon)) {
+        fetchOpenMeteo(lat, lon);
+      } else {
+        console.log(LOG + "no location: " + JSON.stringify(err));
+      }
+    },
+    { timeout: 15000, maximumAge: POSITION_MAX_AGE_MS },
+  );
+}
+
+function fetchOpenMeteo(lat: number, lon: number): void {
+  const url =
+    "https://api.open-meteo.com/v1/forecast?latitude=" + lat.toFixed(3) +
+    "&longitude=" + lon.toFixed(3) +
+    "&current=temperature_2m,weather_code,is_day&timezone=auto";
+  request("GET", url, {}, null, function (status, text) {
+    const reading = status === 200 ? parseOpenMeteo(parseJson(text)) : null;
+    if (reading) {
+      sendWeather(reading, "Open-Meteo");
+    } else {
+      console.log(LOG + "Open-Meteo failed (" + status + ")");
+    }
+  });
+}
+
+// --- Home Assistant -----------------------------------------------------------
+
+function haConnected(): boolean {
+  return !!localStorage.getItem("haUrl") && !!localStorage.getItem("haAccessToken");
+}
+
+function clearHa(): void {
+  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities"].forEach(function (k) {
+    localStorage.removeItem(k);
+  });
+}
+
+function cachedEntities(): WeatherEntity[] {
+  const list = parseJson(localStorage.getItem("haEntities") || "[]");
+  return Array.isArray(list) ? (list as WeatherEntity[]) : [];
+}
+
+function storeToken(token: { access_token?: string; refresh_token?: string; expires_in?: number }): void {
+  localStorage.setItem("haAccessToken", String(token.access_token));
+  if (token.refresh_token) localStorage.setItem("haRefreshToken", token.refresh_token);
+  const ttl = Number(token.expires_in) || 1800;
+  localStorage.setItem("haExpiresAt", String(Date.now() + ttl * 1000));
+}
+
+/** Calls back with a usable access token (refreshing it first if it is about to expire). */
+function withHaToken(cb: (token: string | null) => void, forceRefresh?: boolean): void {
+  const url = localStorage.getItem("haUrl") || "";
+  const refresh = localStorage.getItem("haRefreshToken") || "";
+  const expiresAt = parseInt(localStorage.getItem("haExpiresAt") || "0", 10);
+  if (!forceRefresh && expiresAt - Date.now() > 60000) {
+    cb(localStorage.getItem("haAccessToken"));
+    return;
+  }
+  if (!url || !refresh) {
+    cb(localStorage.getItem("haAccessToken"));
+    return;
+  }
+  request(
+    "POST",
+    url + "/auth/token",
+    { "Content-Type": "application/x-www-form-urlencoded" },
+    tokenRefreshBody(refresh, HA_CLIENT_ID),
+    function (status, text) {
+      const token = parseJson(text) as { access_token?: string } | null;
+      if (status === 200 && token && token.access_token) {
+        storeToken(token);
+        cb(token.access_token);
+      } else {
+        console.log(LOG + "HA token refresh failed (" + status + ")");
+        cb(null);
+      }
+    },
+  );
+}
+
+/** GET a Home Assistant API path as JSON, retrying once with a fresh token on 401. */
+function haGet(path: string, cb: (data: unknown) => void): void {
+  const url = localStorage.getItem("haUrl") || "";
+  const attempt = function (token: string | null, retry: boolean) {
+    if (!url || !token) {
+      cb(null);
+      return;
+    }
+    request("GET", url + path, { Authorization: "Bearer " + token }, null, function (status, text) {
+      if (status === 401 && retry) {
+        withHaToken(function (fresh) {
+          attempt(fresh, false);
+        }, true);
+        return;
+      }
+      cb(status === 200 ? parseJson(text) : null);
+    });
+  };
+  withHaToken(function (token) {
+    attempt(token, true);
+  });
+}
+
+function fetchHaEntities(cb: (list: WeatherEntity[]) => void): void {
+  haGet("/api/states", function (states) {
+    const list = weatherEntitiesFromStates(states);
+    localStorage.setItem("haEntities", JSON.stringify(list));
+    cb(list);
+  });
+}
+
+function fetchHaWeather(entity: string): void {
+  haGet("/api/states/" + encodeURIComponent(entity), function (data) {
+    if (!data) {
+      console.log(LOG + "Home Assistant unreachable, using phone location");
+      fetchLocationWeather();
+      return;
+    }
+    haGet("/api/states/sun.sun", function (sun) {
+      const sunState = sun && typeof (sun as HaStateObject).state === "string"
+        ? (sun as HaStateObject).state || null
+        : null;
+      const reading = parseHaWeather(data as HaStateObject, sunState, new Date().getHours());
+      if (reading) {
+        sendWeather(reading, "Home Assistant");
+      } else {
+        console.log(LOG + entity + " has no temperature, using phone location");
+        fetchLocationWeather();
+      }
+    });
+  });
+}
+
+function refreshWeather(): void {
+  const s = loadSettings();
+  if (s.source === "ha" && haConnected() && s.haEntity) {
+    fetchHaWeather(s.haEntity);
+  } else {
+    fetchLocationWeather();
+  }
+}
+
+// --- Settings page -------------------------------------------------------------
+
+function openConfig(): void {
+  const s = loadSettings();
+  const config = {
+    hero: s.hero,
+    fahrenheit: s.fahrenheit,
+    stepGoal: s.stepGoal,
+    vibe: s.vibe,
+    source: s.source,
+    ha: {
+      connected: haConnected(),
+      url: localStorage.getItem("haUrl") || "",
+      entity: s.haEntity,
+      entities: cachedEntities(),
+    },
+  };
+  const html = CONFIG_HTML.replace("__CONFIG__", JSON.stringify(config));
+  Pebble.openURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+}
+
+function startHaLogin(rawUrl: string): void {
+  const url = normalizeHaUrl(rawUrl);
+  if (!url) return;
+  const nonce = String(Math.random()).slice(2);
+  Pebble.openURL(buildAuthorizeUrl(url, HA_CLIENT_ID, HA_REDIRECT_URI, encodeState(url, nonce)));
+}
+
+function finishHaLogin(code: string, state: string): void {
+  let url = "";
+  try {
+    url = normalizeHaUrl(decodeState(state).haUrl);
+  } catch (e) {
+    console.log(LOG + "bad OAuth state");
+    return;
+  }
+  if (!url || !code) return;
+  request(
+    "POST",
+    url + "/auth/token",
+    { "Content-Type": "application/x-www-form-urlencoded" },
+    tokenExchangeBody(code, HA_CLIENT_ID, HA_REDIRECT_URI),
+    function (status, text) {
+      const token = parseJson(text) as { access_token?: string } | null;
+      if (status !== 200 || !token || !token.access_token) {
+        console.log(LOG + "HA token exchange failed (" + status + ")");
+        return;
+      }
+      localStorage.setItem("haUrl", url);
+      storeToken(token);
+      fetchHaEntities(function (list) {
+        // Pick the first weather entity unless one is already chosen.
+        const s = loadSettings();
+        s.source = "ha";
+        if (!s.haEntity && list.length > 0) s.haEntity = list[0].entity_id;
+        saveSettings(s);
+        console.log(LOG + "Home Assistant connected, " + list.length + " weather entities");
+        // Back into the settings page, now connected, to confirm the entity.
+        openConfig();
+        refreshWeather();
+      });
+    },
+  );
+}
+
+// --- Events ----------------------------------------------------------------------
+
+Pebble.addEventListener("ready", function () {
+  sendSettings();
+  refreshWeather();
+});
+
+Pebble.addEventListener("appmessage", function (e) {
+  if (e && e.payload && e.payload.REFRESH !== undefined) refreshWeather();
+});
+
+Pebble.addEventListener("showConfiguration", function () {
+  openConfig();
+  // Refresh the entity list in the background for next time.
+  if (haConnected()) fetchHaEntities(function () {});
+});
+
+Pebble.addEventListener("webviewclosed", function (e) {
+  if (!e || !e.response) return;
+  const msg = parseJson(decodeURIComponent(e.response)) as {
+    action?: string;
+    settings?: Partial<Settings>;
+    haDisconnect?: boolean;
+    url?: string;
+    code?: string;
+    state?: string;
+    error?: string;
+  } | null;
+  if (!msg) return;
+
+  if (msg.settings) saveSettings(sanitize(msg.settings, loadSettings()));
+
+  if (msg.action === "ha_login") {
+    startHaLogin(msg.url || "");
+    return;
+  }
+  if (msg.action === "ha_code") {
+    if (msg.error) {
+      console.log(LOG + "Home Assistant login error: " + msg.error);
+      return;
+    }
+    finishHaLogin(msg.code || "", msg.state || "");
+    return;
+  }
+  if (msg.haDisconnect) clearHa();
+  sendSettings();
+  refreshWeather();
+});

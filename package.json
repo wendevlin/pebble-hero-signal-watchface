@@ -1,0 +1,156 @@
+{
+  "name": "hero-signal",
+  "author": "wendevlin",
+  "version": "0.1.0",
+  "description": "A superhero comic watchface: big comic-lettered time, a hero signal in the sky that cuts out when your phone disconnects, weather (location or Home Assistant), steps and battery.",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "license": "MIT",
+  "dependencies": {},
+  "scripts": {
+    "build:pkjs": "bun build src/pkjs/index.ts --outfile src/pkjs/index.js --target browser --format iife",
+    "build": "bun run build:pkjs && pebble build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun test",
+    "clean": "pebble clean",
+    "emulator:emery": "pebble install --emulator emery --logs",
+    "emulator:gabbro": "pebble install --emulator gabbro --logs"
+  },
+  "pebble": {
+    "displayName": "Hero Signal",
+    "uuid": "08e6da17-9094-4dfa-81c3-ae48cdf0f762",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "basalt",
+      "chalk",
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": [
+      "location",
+      "configurable",
+      "health"
+    ],
+    "usesPermissions": [
+      "Location",
+      "Internet",
+      "LocalNetwork"
+    ],
+    "messageKeys": [
+      "WEATHER_TEMP",
+      "WEATHER_COND",
+      "IS_DAY",
+      "FAHRENHEIT",
+      "STEP_GOAL",
+      "VIBE_DISCONNECT",
+      "HERO_COLOR",
+      "REFRESH"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "font",
+          "name": "FONT_TIME_50",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "basalt"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_TIME_54",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "chalk"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_TIME_66",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_TIME_74",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_20",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[ -~°ÄÖÜäöü]",
+          "targetPlatforms": [
+            "basalt",
+            "chalk"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_22",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[ -~°ÄÖÜäöü]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SMALL_24",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[ -~°ÄÖÜäöü]",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SFX_24",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[A-Z!]",
+          "targetPlatforms": [
+            "basalt",
+            "chalk"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SFX_30",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[A-Z!]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_SFX_34",
+          "file": "fonts/Bangers-Regular.ttf",
+          "characterRegex": "[A-Z!]",
+          "targetPlatforms": [
+            "gabbro"
+          ]
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^6.0.2"
+  }
+}

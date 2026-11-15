@@ -1,0 +1,20 @@
+# Pebble build output
+build/
+*.pbw
+
+# Waf build lock
+.lock-waf_*
+
+# Generated PebbleKit JS (bundled from src/pkjs/index.ts by `bun run build:pkjs`)
+src/pkjs/index.js
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Emulator screenshots / recordings
+pebble_screenshot_*.png
+
+# OS / editor cruft
+.DS_Store
+*.swp

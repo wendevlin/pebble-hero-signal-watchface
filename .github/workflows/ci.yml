@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - name: Typecheck
+        run: bunx tsc -p tsconfig.json
+      - name: Run tests
+        run: bun test
+
+  build:
+    name: Build .pbw
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: bun install
+      - name: Install pebble-tool
+        run: pip install pebble-tool
+      - name: Install Pebble SDK
+        run: yes | pebble sdk install 4.44
+      - name: Build .pbw
+        run: bun run build
+      - name: Upload .pbw artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hero-signal
+          path: build/*.pbw

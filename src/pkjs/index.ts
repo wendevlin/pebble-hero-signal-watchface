@@ -230,7 +230,7 @@ function haConnected(): boolean {
 }
 
 function clearHa(): void {
-  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities", "haError"].forEach(function (k) {
+  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities"].forEach(function (k) {
     localStorage.removeItem(k);
   });
 }
@@ -355,11 +355,8 @@ function openConfig(): void {
       url: localStorage.getItem("haUrl") || "",
       entity: s.haEntity,
       entities: cachedEntities(),
-      // Shown once: why the last connection attempt failed.
-      error: localStorage.getItem("haError") || "",
     },
   };
-  localStorage.removeItem("haError");
   const html = CONFIG_HTML.replace("__CONFIG__", JSON.stringify(config));
   Pebble.openURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
@@ -369,7 +366,7 @@ function finishHaLogin(code: string, state: string): void {
   try {
     const decoded = decodeState(state);
     url = normalizeHaUrl(decoded.haUrl);
-    // Choices made on the settings page before tapping Connect.
+    // Settings carried in the state by older builds.
     if (decoded.settings && typeof decoded.settings === "object") {
       saveSettings(sanitize(decoded.settings as Partial<Settings>, loadSettings()));
     }
@@ -406,36 +403,6 @@ function finishHaLogin(code: string, state: string): void {
   );
 }
 
-/**
- * Connect with a long-lived access token pasted on the settings page (the
- * fallback when Home Assistant's login page doesn't render in the Pebble app).
- * The settings page is closed by now, so the outcome lands on the watch (a
- * pre-selected sensor) or as an error message the next time settings open.
- */
-function connectWithToken(rawUrl: string, token: string): void {
-  const url = normalizeHaUrl(rawUrl);
-  if (!url || !token) return;
-  request("GET", url + "/api/", { Authorization: "Bearer " + token }, null, function (status) {
-    if (status !== 200) {
-      const why = status === 401 ? "the token was rejected" : status === 0 ? "it is not reachable" : "status " + status;
-      localStorage.setItem("haError", "Couldn't connect to " + url + ": " + why + ".");
-      console.log(LOG + "token login failed (" + status + ")");
-      return;
-    }
-    clearHa();
-    localStorage.setItem("haUrl", url);
-    localStorage.setItem("haAccessToken", token);
-    // No refresh token and no expiry: long-lived tokens are used as they are.
-    fetchHaEntities(function (list) {
-      const s = loadSettings();
-      if (!s.haEntity) s.haEntity = defaultTempEntity(list);
-      saveSettings(s);
-      console.log(LOG + "Home Assistant connected with a token, " + list.length + " entities");
-      refreshWeather();
-    });
-  });
-}
-
 // --- Events ----------------------------------------------------------------------
 
 Pebble.addEventListener("ready", function () {
@@ -459,8 +426,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
     action?: string;
     settings?: Partial<Settings>;
     haDisconnect?: boolean;
-    url?: string;
-    token?: string;
     code?: string;
     state?: string;
     error?: string;
@@ -469,11 +434,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
 
   if (msg.settings) saveSettings(sanitize(msg.settings, loadSettings()));
 
-  if (msg.action === "ha_token") {
-    sendSettings();  // the rest of the page was saved above, whatever the token does
-    connectWithToken(msg.url || "", msg.token || "");
-    return;
-  }
   if (msg.action === "ha_code") {
     if (msg.error) {
       console.log(LOG + "Home Assistant login error: " + msg.error);

@@ -21,27 +21,14 @@ export const HA_REDIRECT_URI =
   "https://wendevlin.github.io/pebble-hero-signal-watchface/oauth/callback.html";
 
 /**
- * A host Home Assistant typically serves over plain http: an mDNS name, a
- * private IP or anything on HA's default port 8123.
- */
-export function isLocalHaHost(hostAndPort: string): boolean {
-  const m = /^\[?([^\]/]+?)\]?(?::(\d+))?(?:\/.*)?$/.exec(hostAndPort);
-  if (!m) return false;
-  const host = m[1].toLowerCase();
-  if (m[2] === "8123") return true;
-  if (/\.(local|lan|home|internal|home\.arpa)$/.test(host) || host === "localhost") return true;
-  return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
-}
-
-/**
- * Normalize a user-entered Home Assistant URL: trim, add a scheme when missing
- * (http:// for local addresses, https:// otherwise) and strip trailing slashes.
- * Returns "" for empty input. config.html has a copy: keep them in sync.
+ * Normalize a user-entered Home Assistant URL like Casita does: trim, default
+ * to https:// and strip trailing slashes. Returns "" for empty input.
+ * config.html has a copy: keep them in sync.
  */
 export function normalizeHaUrl(input: string): string {
   let url = (input || "").trim();
   if (url === "") return "";
-  if (!/^https?:\/\//i.test(url)) url = (isLocalHaHost(url) ? "http://" : "https://") + url;
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   return url.replace(/\/+$/, "");
 }
 
@@ -109,16 +96,16 @@ export function base64UrlDecode(str: string): string {
 export interface HaState {
   haUrl: string;
   nonce: string;
-  /** The settings page's unsaved choices, restored after the login. */
+  /** Settings carried by states from older builds ({u, n, s}); null otherwise. */
   settings: unknown;
 }
 
 /**
- * Encode the HA URL, a random nonce and the page's current settings into an
- * opaque, URL-safe state param (format: base64url(JSON {u, n, s})).
+ * Encode the HA URL and a random nonce into an opaque, URL-safe state param
+ * (base64url(JSON {u, n}), the same format as Casita).
  */
-export function encodeState(haUrl: string, nonce: string, settings?: unknown): string {
-  return base64UrlEncode(JSON.stringify({ u: haUrl, n: nonce, s: settings }));
+export function encodeState(haUrl: string, nonce: string): string {
+  return base64UrlEncode(JSON.stringify({ u: haUrl, n: nonce }));
 }
 
 /** Decode a state param produced by encodeState. Throws on malformed input. */

@@ -25,7 +25,9 @@ from your phone without noticing.
 - **Plus a Home Assistant temperature**, shown next to it as `12°/21°`
   (outside / Home Assistant). Log in from the settings page (OAuth, no
   long-lived token to paste) and pick a `weather.*` entity or any temperature
-  sensor, e.g. your living room.
+  sensor, e.g. your living room. If Home Assistant's login page doesn't show
+  up in the Pebble app, paste a long-lived access token instead (HA profile →
+  Security → Long-lived access tokens).
 - **Power meter:** today's steps against your goal; turns green when you hit it.
 - **Energy meter:** battery level (the bolt turns green while charging).
 - **Four hero colours:** red, blue, green, purple.

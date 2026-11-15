@@ -90,6 +90,10 @@
   }
   .status { font-weight: 600; margin: 4px 0 10px; word-break: break-all; }
   .hidden { display: none; }
+  .status.error { color: var(--red); }
+  details { margin-top: 12px; border-top: 2px dashed var(--ink); padding-top: 10px; }
+  summary { font-weight: 600; cursor: pointer; }
+  input[type=password] { width: 100%; padding: 10px; font-size: 16px; border: 3px solid var(--ink); background: #fff; border-radius: 0; }
 </style>
 </head>
 <body>
@@ -141,8 +145,16 @@
       <input type="url" id="haUrl" placeholder="https://example.ui.nabu.casa" autocapitalize="off" autocorrect="off">
       <p><button class="btn small" id="haConnect" type="button">Connect</button></p>
       <p class="status hidden" id="haStatus"></p>
-      <p class="hint">Local addresses (like <code>homeassistant.local:8123</code>) need your phone on the home Wi-Fi. If the login page stays blank, try your Nabu Casa or other external https address.</p>
+      <p class="hint">Local addresses (like <code>homeassistant.local:8123</code>) need your phone on the home Wi-Fi.</p>
+      <details id="haTokenBox">
+        <summary>Login page stays blank? Use an access token instead</summary>
+        <p class="hint">In Home Assistant open your profile → <b>Security</b> → <b>Long-lived access tokens</b> → <b>Create token</b>, then paste it here. Uses the address above.</p>
+        <input type="password" id="haToken" placeholder="Long-lived access token" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <p><button class="btn small" id="haUseToken" type="button">Connect with token</button></p>
+        <p class="hint">Settings close while the watch checks the token. Open them again to pick a different sensor.</p>
+      </details>
     </div>
+    <p class="status error hidden" id="haError"></p>
   </div>
 
   <div class="panel">
@@ -176,6 +188,10 @@
   $('vibe').checked = !!config.vibe;
   $('goal').value = config.stepGoal;
   $('haUrl').value = config.ha.url || '';
+  if (config.ha.error) {
+    $('haError').textContent = config.ha.error;
+    $('haError').classList.remove('hidden');
+  }
 
   var select = $('haEntity');
   var entities = config.ha.entities || [];
@@ -271,6 +287,13 @@
       encodeURIComponent(config.ha.clientId) + '&redirect_uri=' +
       encodeURIComponent(config.ha.redirectUri) + '&response_type=code&state=' +
       encodeURIComponent(state);
+  });
+  $('haUseToken').addEventListener('click', function () {
+    var url = normalizeUrl($('haUrl').value);
+    var token = $('haToken').value.replace(/\s+/g, '');
+    if (!url) { $('haUrl').focus(); return; }
+    if (!token) { $('haToken').focus(); return; }
+    close({ action: 'ha_token', url: url, token: token, settings: settings() });
   });
   $('save').addEventListener('click', function () {
     close({ action: 'save', settings: settings(), haDisconnect: disconnectRequested });

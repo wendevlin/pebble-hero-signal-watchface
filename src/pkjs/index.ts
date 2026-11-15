@@ -19,10 +19,14 @@ import CONFIG_PAGE from "./config.html" with { type: "text" };
 import {
   HA_CLIENT_ID,
   HA_REDIRECT_URI,
-  decodeState,
+  interpretLoginFlow,
+  loginFlowCredentialsBody,
+  loginFlowMfaBody,
+  loginFlowStartBody,
   normalizeHaUrl,
   tokenExchangeBody,
   tokenRefreshBody,
+  type LoginStep,
 } from "./ha";
 import {
   defaultTempEntity,
@@ -230,7 +234,7 @@ function haConnected(): boolean {
 }
 
 function clearHa(): void {
-  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities"].forEach(function (k) {
+  ["haUrl", "haAccessToken", "haRefreshToken", "haExpiresAt", "haEntities", "haError"].forEach(function (k) {
     localStorage.removeItem(k);
   });
 }
@@ -349,32 +353,69 @@ function openConfig(): void {
     stepGoal: s.stepGoal,
     vibe: s.vibe,
     ha: {
-      clientId: HA_CLIENT_ID,
-      redirectUri: HA_REDIRECT_URI,
       connected: haConnected(),
-      url: localStorage.getItem("haUrl") || "",
+      url: localStorage.getItem("haUrl") || localStorage.getItem("haLastUrl") || "",
+      user: localStorage.getItem("haLastUser") || "",
       entity: s.haEntity,
       entities: cachedEntities(),
+      // Shown once: why the last login attempt failed.
+      error: localStorage.getItem("haError") || "",
     },
   };
+  localStorage.removeItem("haError");
   const html = CONFIG_HTML.replace("__CONFIG__", JSON.stringify(config));
   Pebble.openURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
 
-function finishHaLogin(code: string, state: string): void {
-  let url = "";
-  try {
-    const decoded = decodeState(state);
-    url = normalizeHaUrl(decoded.haUrl);
-    // Settings carried in the state by older builds.
-    if (decoded.settings && typeof decoded.settings === "object") {
-      saveSettings(sanitize(decoded.settings as Partial<Settings>, loadSettings()));
+function haLoginFailed(url: string, message: string): void {
+  console.log(LOG + "Home Assistant login failed: " + message);
+  localStorage.setItem("haError", "Couldn't log in to " + url + ": " + message + ".");
+}
+
+/** POST JSON to a login-flow URL and interpret the answer. */
+function loginFlowPost(url: string, body: string, cb: (step: LoginStep) => void): void {
+  request("POST", url, { "Content-Type": "application/json" }, body, function (status, text) {
+    cb(interpretLoginFlow(status, parseJson(text)));
+  });
+}
+
+/**
+ * Log in through Home Assistant's login-flow API with the username, password
+ * (and two-factor code) typed on the settings page; see src/pkjs/ha.ts for
+ * why this replaces HA's login web page. Ends with regular OAuth tokens.
+ */
+function haPasswordLogin(rawUrl: string, username: string, password: string, mfa: string): void {
+  const url = normalizeHaUrl(rawUrl);
+  if (!url || !username || !password) return;
+  localStorage.setItem("haLastUrl", url);
+  localStorage.setItem("haLastUser", username);
+  loginFlowPost(url + "/auth/login_flow", loginFlowStartBody(HA_CLIENT_ID, HA_REDIRECT_URI), function (start) {
+    if (start.kind !== "step") {
+      haLoginFailed(url, start.kind === "error" ? start.message : "unexpected answer from Home Assistant");
+      return;
     }
-  } catch (e) {
-    console.log(LOG + "bad OAuth state");
-    return;
-  }
-  if (!url || !code) return;
+    const flowUrl = url + "/auth/login_flow/" + encodeURIComponent(start.flowId);
+    loginFlowPost(flowUrl, loginFlowCredentialsBody(username, password, HA_CLIENT_ID), function (step) {
+      if (step.kind === "code") {
+        exchangeHaCode(url, step.code);
+      } else if (step.kind === "step" && step.stepId === "mfa") {
+        if (!mfa) {
+          haLoginFailed(url, "this account uses two-factor authentication, enter the current code too");
+          return;
+        }
+        loginFlowPost(flowUrl, loginFlowMfaBody(mfa, HA_CLIENT_ID), function (last) {
+          if (last.kind === "code") exchangeHaCode(url, last.code);
+          else haLoginFailed(url, last.kind === "error" ? last.message : "unexpected answer from Home Assistant");
+        });
+      } else {
+        haLoginFailed(url, step.kind === "error" ? step.message : "unexpected login step " + step.stepId);
+      }
+    });
+  });
+}
+
+/** Trade a login-flow code for tokens, then pick a sensor and push its temperature. */
+function exchangeHaCode(url: string, code: string): void {
   request(
     "POST",
     url + "/auth/token",
@@ -383,9 +424,10 @@ function finishHaLogin(code: string, state: string): void {
     function (status, text) {
       const token = parseJson(text) as { access_token?: string } | null;
       if (status !== 200 || !token || !token.access_token) {
-        console.log(LOG + "HA token exchange failed (" + status + ")");
+        haLoginFailed(url, "token exchange failed (" + status + ")");
         return;
       }
+      clearHa();
       localStorage.setItem("haUrl", url);
       storeToken(token);
       fetchHaEntities(function (list) {
@@ -393,10 +435,7 @@ function finishHaLogin(code: string, state: string): void {
         const s = loadSettings();
         if (!s.haEntity) s.haEntity = defaultTempEntity(list);
         saveSettings(s);
-        sendSettings();  // includes choices carried through the login
         console.log(LOG + "Home Assistant connected, " + list.length + " entities");
-        // Back into the settings page, now connected, to confirm the entity.
-        openConfig();
         refreshWeather();
       });
     },
@@ -426,20 +465,18 @@ Pebble.addEventListener("webviewclosed", function (e) {
     action?: string;
     settings?: Partial<Settings>;
     haDisconnect?: boolean;
-    code?: string;
-    state?: string;
-    error?: string;
+    url?: string;
+    username?: string;
+    password?: string;
+    mfa?: string;
   } | null;
   if (!msg) return;
 
   if (msg.settings) saveSettings(sanitize(msg.settings, loadSettings()));
 
-  if (msg.action === "ha_code") {
-    if (msg.error) {
-      console.log(LOG + "Home Assistant login error: " + msg.error);
-      return;
-    }
-    finishHaLogin(msg.code || "", msg.state || "");
+  if (msg.action === "ha_login") {
+    sendSettings();  // the rest of the page was saved above
+    haPasswordLogin(msg.url || "", msg.username || "", msg.password || "", msg.mfa || "");
     return;
   }
   if (msg.haDisconnect) clearHa();

@@ -23,7 +23,8 @@ from your phone without noticing.
 - **Outdoor weather** from the phone location via [Open-Meteo](https://open-meteo.com/)
   (no API key): icon, sky and temperature.
 - **Plus a Home Assistant temperature**, shown next to it as `12°/21°`
-  (outside / Home Assistant). Log in from the settings page (OAuth, no
+  (outside / Home Assistant). Log in from the settings page with your Home
+  Assistant username and password (plus two-factor code if you use it; no
   long-lived token to paste) and pick a `weather.*` entity or any temperature
   sensor, e.g. your living room.
 - **Power meter:** today's steps against your goal; turns green when you hit it.
@@ -53,7 +54,7 @@ the face relies on colour.
   (Sutherland–Hodgman), Ben-Day halftone, speed rays, sound-effect bursts and
   outlined lettering. `scene.c` lays out the page for rectangular and round
   screens of any size, and `main.c` holds the state and watch services.
-- **Phone (TypeScript, `src/pkjs/`):** weather fetching, Home Assistant OAuth,
+- **Phone (TypeScript, `src/pkjs/`):** weather fetching, the Home Assistant login,
   and the settings page (`config.html`, bundled in as a string). The bundle is
   built with Bun.
 - **Font:** [Bangers](https://github.com/googlefonts/bangers) (SIL OFL 1.1),
@@ -100,16 +101,25 @@ The site is published from the `docs/` folder of `main`
 | Path | Purpose |
 | --- | --- |
 | `docs/index.html` | Landing page and future documentation home. Also the Home Assistant OAuth `client_id`. |
-| `docs/oauth/callback.html` | Home Assistant OAuth redirect: hands the login code back to the Pebble app via `pebblejs://close#…`. |
+| `docs/oauth/callback.html` | The registered OAuth `redirect_uri`. It hands a login code back to the Pebble app via `pebblejs://close#…` (see below for why the app doesn't use it today). |
 | `docs/screenshots/` | Screenshots used by the README and the site. |
 
-Home Assistant identifies apps by a URL (`client_id`) and only redirects to the
-same host, so both URLs live on this site (see `src/pkjs/ha.ts`). **Don't move
-`docs/oauth/callback.html`**: its URL is compiled into every released `.pbw`.
-Documentation can grow freely next to it. A test checks that the callback
-exists where the app expects it.
+Home Assistant identifies apps by a URL (`client_id`) and requires a
+`redirect_uri` on the same host, so both live on this site (see
+`src/pkjs/ha.ts`). **Don't move `docs/oauth/callback.html`**: its URL is
+compiled into every released `.pbw`. Documentation can grow freely next to it.
+A test checks that the callback exists where the app expects it.
 
-The Home Assistant login only works once GitHub Pages is enabled.
+### Home Assistant login
+
+Home Assistant's own login page doesn't work inside the Pebble app. The app's
+settings webview blocks web storage, and HA's login script touches
+`localStorage` first thing, so it dies and only the logo shows. Reproduced in
+Chromium by making storage access throw. So the settings page asks for
+username, password and an optional two-factor code. The phone then logs in
+through HA's login-flow API (`/auth/login_flow`, the same API HA's login page
+uses) and trades the resulting code for regular OAuth access and refresh
+tokens. The password only goes to Home Assistant and is never stored.
 
 ### Phone permissions
 

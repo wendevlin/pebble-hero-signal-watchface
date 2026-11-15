@@ -1,19 +1,23 @@
 /*
- * Pure helpers for the Home Assistant OAuth flow (phone-side), adapted from
- * the Casita watchface. Unit-tested in tests/ha.test.ts.
+ * Pure helpers for logging in to Home Assistant (phone-side). Unit-tested in
+ * tests/ha.test.ts.
  *
- * Home Assistant uses IndieAuth-style OAuth2: `client_id` is a URL that
- * identifies the app, and `redirect_uri` must be on the same host. Both live on
- * this repo's GitHub Pages site (served from /docs):
- *   - client_id:    the site root (docs/index.html, also the future docs home)
- *   - redirect_uri: docs/oauth/callback.html, which bounces the auth code back
- *                   into the Pebble app via `pebblejs://close#...`
- * The callback URL is baked into every released .pbw: don't move that file.
+ * Why not Home Assistant's login web page: the Pebble app's settings webview
+ * blocks web storage, and HA's login page touches localStorage first thing,
+ * so its script dies and only the logo shows (reproduced in Chromium with
+ * storage access throwing). Instead the phone talks to HA's login-flow API,
+ * the same API that login page uses:
  *
- * The login starts IN the settings webview (config.html navigates to HA's
- * authorize page itself; the Pebble app does not let PebbleKit JS open a new
- * page after the settings closed). config.html therefore carries its own copy
- * of base64UrlEncode and the state format: keep the two in sync.
+ *   POST /auth/login_flow            {client_id, handler, redirect_uri} -> flow_id
+ *   POST /auth/login_flow/<flow_id>  {username, password, client_id}    -> code
+ *                                    (or a "mfa" step: {code, client_id} -> code)
+ *   POST /auth/token                 authorization_code -> access + refresh token
+ *
+ * So the result is the same OAuth tokens as a browser login, no long-lived
+ * token. The password only goes to Home Assistant and is never stored.
+ *
+ * HA identifies the app by `client_id` (a URL) and requires `redirect_uri` on
+ * the same host; both point at this repo's GitHub Pages site (docs/).
  */
 
 export const HA_CLIENT_ID = "https://wendevlin.github.io/pebble-hero-signal-watchface/";
@@ -32,105 +36,60 @@ export function normalizeHaUrl(input: string): string {
   return url.replace(/\/+$/, "");
 }
 
-// --- base64url over UTF-8 (no btoa/TextEncoder in every runtime) ------------
+// --- Login flow ---------------------------------------------------------------
 
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-function utf8Bytes(str: string): number[] {
-  const enc = encodeURIComponent(str);
-  const bytes: number[] = [];
-  for (let i = 0; i < enc.length; i++) {
-    if (enc.charAt(i) === "%") {
-      bytes.push(parseInt(enc.substr(i + 1, 2), 16));
-      i += 2;
-    } else {
-      bytes.push(enc.charCodeAt(i));
-    }
-  }
-  return bytes;
+/** Body that starts a login flow with HA's built-in username/password provider. */
+export function loginFlowStartBody(clientId: string, redirectUri: string): string {
+  return JSON.stringify({ client_id: clientId, handler: ["homeassistant", null], redirect_uri: redirectUri });
 }
 
-function bytesToUtf8(bytes: number[]): string {
-  let enc = "";
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i];
-    enc += b < 16 ? "%0" + b.toString(16) : "%" + b.toString(16);
-  }
-  return decodeURIComponent(enc);
+export function loginFlowCredentialsBody(username: string, password: string, clientId: string): string {
+  return JSON.stringify({ username: username, password: password, client_id: clientId });
 }
 
-export function base64UrlEncode(str: string): string {
-  const bytes = utf8Bytes(str);
-  let out = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0;
-    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-    out += B64.charAt(b0 >> 2);
-    out += B64.charAt(((b0 & 3) << 4) | (b1 >> 4));
-    out += i + 1 < bytes.length ? B64.charAt(((b1 & 15) << 2) | (b2 >> 6)) : "";
-    out += i + 2 < bytes.length ? B64.charAt(b2 & 63) : "";
-  }
-  return out;
+export function loginFlowMfaBody(code: string, clientId: string): string {
+  return JSON.stringify({ code: code, client_id: clientId });
 }
 
-export function base64UrlDecode(str: string): string {
-  const bytes: number[] = [];
-  let buffer = 0;
-  let bits = 0;
-  for (let i = 0; i < str.length; i++) {
-    const idx = B64.indexOf(str.charAt(i));
-    if (idx < 0) continue;
-    buffer = (buffer << 6) | idx;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      bytes.push((buffer >> bits) & 0xff);
-    }
-  }
-  return bytesToUtf8(bytes);
-}
+/** What a login-flow response means for the next step. */
+export type LoginStep =
+  | { kind: "code"; code: string }
+  | { kind: "step"; flowId: string; stepId: string }
+  | { kind: "error"; message: string };
 
-// --- OAuth ------------------------------------------------------------------
+const FLOW_ERRORS: { [code: string]: string } = {
+  invalid_auth: "wrong username or password",
+  invalid_code: "wrong two-factor code",
+  login_expired: "the login took too long, try again",
+};
 
-export interface HaState {
-  haUrl: string;
-  nonce: string;
-  /** Settings carried by states from older builds ({u, n, s}); null otherwise. */
-  settings: unknown;
-}
-
-/**
- * Encode the HA URL and a random nonce into an opaque, URL-safe state param
- * (base64url(JSON {u, n}), the same format as Casita).
- */
-export function encodeState(haUrl: string, nonce: string): string {
-  return base64UrlEncode(JSON.stringify({ u: haUrl, n: nonce }));
-}
-
-/** Decode a state param produced by encodeState. Throws on malformed input. */
-export function decodeState(state: string): HaState {
-  const obj = JSON.parse(base64UrlDecode(state));
-  return {
-    haUrl: String(obj.u || ""),
-    nonce: String(obj.n || ""),
-    settings: obj.s === undefined ? null : obj.s,
+/** Interpret an HTTP status + body from /auth/login_flow(/<id>). */
+export function interpretLoginFlow(status: number, body: unknown): LoginStep {
+  if (status === 0) return { kind: "error", message: "Home Assistant is not reachable from the phone" };
+  if (status === 403) return { kind: "error", message: "Home Assistant refused the login (IP banned or blocked)" };
+  if (status === 404) return { kind: "error", message: "no Home Assistant login found at this address" };
+  const r = (body || {}) as {
+    type?: string;
+    result?: unknown;
+    flow_id?: string;
+    step_id?: string;
+    errors?: { base?: string } | null;
+    reason?: string;
+    message?: string;
   };
-}
-
-export function buildAuthorizeUrl(
-  haUrl: string,
-  clientId: string,
-  redirectUri: string,
-  state: string,
-): string {
-  return (
-    haUrl +
-    "/auth/authorize?client_id=" + encodeURIComponent(clientId) +
-    "&redirect_uri=" + encodeURIComponent(redirectUri) +
-    "&response_type=code" +
-    "&state=" + encodeURIComponent(state)
-  );
+  if (status !== 200) {
+    return { kind: "error", message: "Home Assistant answered " + status + (r.message ? " (" + r.message + ")" : "") };
+  }
+  if (r.type === "create_entry" && typeof r.result === "string" && r.result) {
+    return { kind: "code", code: r.result };
+  }
+  if (r.type === "form" && r.flow_id) {
+    const base = r.errors && r.errors.base;
+    if (base) return { kind: "error", message: FLOW_ERRORS[base] || base };
+    return { kind: "step", flowId: r.flow_id, stepId: r.step_id || "" };
+  }
+  if (r.type === "abort") return { kind: "error", message: "login aborted (" + (r.reason || "unknown") + ")" };
+  return { kind: "error", message: "unexpected answer from Home Assistant" };
 }
 
 export function tokenExchangeBody(code: string, clientId: string, redirectUri: string): string {

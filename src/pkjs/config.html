@@ -90,6 +90,10 @@
   }
   .status { font-weight: 600; margin: 4px 0 10px; word-break: break-all; }
   .hidden { display: none; }
+  .status.error { color: var(--red); }
+  #haLogin label { display: block; margin: 12px 0 4px; font-weight: 600; }
+  #haLogin label .hint { font-weight: normal; }
+  input[type=text], input[type=password] { width: 100%; padding: 10px; font-size: 16px; border: 3px solid var(--ink); background: #fff; border-radius: 0; }
 
 </style>
 </head>
@@ -138,11 +142,19 @@
       <p><button class="btn small danger" id="haDisconnect" type="button">Disconnect</button></p>
     </div>
     <div id="haLogin" class="hidden">
-      <p class="hint">Enter the address you use to open Home Assistant (reachable from your phone, e.g. your Nabu Casa URL).</p>
-      <input type="url" id="haUrl" placeholder="https://example.ui.nabu.casa" autocapitalize="off" autocorrect="off">
+      <label for="haUrl">Address</label>
+      <input type="url" id="haUrl" placeholder="https://example.ui.nabu.casa" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p class="hint">As in your browser, e.g. <code>http://homeassistant.local:8123</code> at home or your Nabu Casa address. Without <code>http://</code>, <code>https://</code> is assumed.</p>
+      <label for="haUser">Username</label>
+      <input type="text" id="haUser" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <label for="haPass">Password</label>
+      <input type="password" id="haPass" autocomplete="current-password">
+      <label for="haMfa">Two-factor code <span class="hint">(only if you use it)</span></label>
+      <input type="text" id="haMfa" inputmode="numeric" autocomplete="one-time-code" maxlength="8">
       <p><button class="btn small" id="haConnect" type="button">Connect</button></p>
-      <p class="status hidden" id="haStatus"></p>
-      <p class="hint">Use the full address as in your browser, e.g. <code>http://homeassistant.local:8123</code> at home. Without <code>http://</code>, <code>https://</code> is assumed.</p>
+      <p class="hint">Your password goes straight to your Home Assistant and isn't stored; the watchface keeps a login token like any HA app. Settings close while the phone logs in; open them again to see the connection and pick a sensor.</p>
+    </div>
+    <p class="status error hidden" id="haError"></p>
     </div>
   </div>
 
@@ -177,6 +189,11 @@
   $('vibe').checked = !!config.vibe;
   $('goal').value = config.stepGoal;
   $('haUrl').value = config.ha.url || '';
+  $('haUser').value = config.ha.user || '';
+  if (config.ha.error) {
+    $('haError').textContent = config.ha.error;
+    $('haError').classList.remove('hidden');
+  }
 
   var select = $('haEntity');
   var entities = config.ha.entities || [];
@@ -224,26 +241,6 @@
     disconnectRequested = true;
     render();
   });
-  // --- Home Assistant login -------------------------------------------------
-  // The login runs IN this webview: navigate to HA's authorize page; HA then
-  // redirects to the callback page, which closes the webview with the code
-  // (pkjs finishes the login in webviewclosed and reopens these settings).
-  // base64url + state format must match src/pkjs/ha.ts.
-  var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-  function base64UrlEncode(str) {
-    var enc = encodeURIComponent(str), bytes = [], out = '', i;
-    for (i = 0; i < enc.length; i++) {
-      if (enc.charAt(i) === '%') { bytes.push(parseInt(enc.substr(i + 1, 2), 16)); i += 2; }
-      else bytes.push(enc.charCodeAt(i));
-    }
-    for (i = 0; i < bytes.length; i += 3) {
-      var b0 = bytes[i], b1 = i + 1 < bytes.length ? bytes[i + 1] : 0, b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
-      out += B64.charAt(b0 >> 2) + B64.charAt(((b0 & 3) << 4) | (b1 >> 4));
-      if (i + 1 < bytes.length) out += B64.charAt(((b1 & 15) << 2) | (b2 >> 6));
-      if (i + 2 < bytes.length) out += B64.charAt(b2 & 63);
-    }
-    return out;
-  }
   // Same rules as normalizeHaUrl in src/pkjs/ha.ts (and the Casita watchface):
   // https:// unless a scheme is given.
   function normalizeUrl(input) {
@@ -252,19 +249,17 @@
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
     return url.replace(/\/+$/, '');
   }
+  // The phone logs in through Home Assistant's login API (src/pkjs/ha.ts):
+  // HA's own login page can't run inside the Pebble app.
   $('haConnect').addEventListener('click', function () {
     var url = normalizeUrl($('haUrl').value);
+    var user = $('haUser').value.trim();
+    var pass = $('haPass').value;
     if (!url) { $('haUrl').focus(); return; }
-    var nonce = String(Math.floor(Math.random() * 1e9)) + '-' + String(Date.now());
-    var state = base64UrlEncode(JSON.stringify({ u: url, n: nonce }));
-    // Feedback while Home Assistant loads; if it never does, the address is
-    // not reachable from this phone.
-    $('haStatus').textContent = 'Opening ' + url + ' …';
-    $('haStatus').classList.remove('hidden');
-    window.location.href = url + '/auth/authorize?client_id=' +
-      encodeURIComponent(config.ha.clientId) + '&redirect_uri=' +
-      encodeURIComponent(config.ha.redirectUri) + '&response_type=code&state=' +
-      encodeURIComponent(state);
+    if (!user) { $('haUser').focus(); return; }
+    if (!pass) { $('haPass').focus(); return; }
+    close({ action: 'ha_login', url: url, username: user, password: pass,
+            mfa: $('haMfa').value.replace(/\s+/g, ''), settings: settings() });
   });
   $('save').addEventListener('click', function () {
     close({ action: 'save', settings: settings(), haDisconnect: disconnectRequested });

@@ -50,6 +50,7 @@ typedef struct {
   bool charging;
 
   uint8_t hero;
+  uint8_t city;  /* skyline, see City in skyline.h */
 } Scene;
 
 void scene_init(void);

@@ -26,7 +26,7 @@ def configure(ctx):
 def build(ctx):
     ctx.load('pebble_sdk')
 
-    # Screenshot mode: HERO_DEMO="cond,night,disconnected,hero" (e.g. "1,0,0,0")
+    # Screenshot mode: HERO_DEMO="cond,night,disconnected,hero,city" (e.g. "1,0,0,0,2")
     # renders a fixed, fully populated scene instead of live data.
     if os.environ.get('HERO_STACK_USAGE'):
         for platform in ctx.env.TARGET_PLATFORMS:
@@ -34,11 +34,11 @@ def build(ctx):
 
     demo = os.environ.get('HERO_DEMO')
     if demo:
-        cond, night, disc, hero = (demo.split(',') + ['0', '0', '0', '0'])[:4]
+        cond, night, disc, hero, city = (demo.split(',') + ['0'] * 5)[:5]
         for platform in ctx.env.TARGET_PLATFORMS:
             ctx.all_envs[platform].append_value('DEFINES', [
                 'HERO_DEMO=1', 'HERO_DEMO_COND=' + cond, 'HERO_DEMO_NIGHT=' + night,
-                'HERO_DEMO_DISC=' + disc, 'HERO_DEMO_HERO=' + hero])
+                'HERO_DEMO_DISC=' + disc, 'HERO_DEMO_HERO=' + hero, 'HERO_DEMO_CITY=' + city])
 
     build_worker = os.path.exists('worker_src')
     binaries = []

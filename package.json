@@ -51,6 +51,7 @@
       "VIBE_DISCONNECT",
       "HERO_COLOR",
       "HA_TEMP",
+      "SKYLINE",
       "REFRESH"
     ],
     "resources": {

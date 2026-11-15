@@ -44,6 +44,9 @@ const CONFIG_HTML = CONFIG_PAGE as unknown as string;
 
 const LOG = "Hero Signal: ";
 const POSITION_MAX_AGE_MS = 30 * 60 * 1000;
+// Number of skylines (City in src/c/skyline.h, CITIES in config.html).
+const SKYLINE_COUNT = 5;
+
 // HA_TEMP value that switches the Home Assistant temperature off on the watch.
 const HA_TEMP_NONE = -32768;
 
@@ -51,6 +54,8 @@ const HA_TEMP_NONE = -32768;
 
 interface Settings {
   hero: number;
+  /** Skyline, see City in src/c/skyline.h. */
+  skyline: number;
   fahrenheit: boolean;
   stepGoal: number;
   vibe: boolean;
@@ -60,6 +65,7 @@ interface Settings {
 
 const DEFAULTS: Settings = {
   hero: 0,
+  skyline: 0,
   fahrenheit: false,
   stepGoal: 8000,
   vibe: true,
@@ -69,6 +75,7 @@ const DEFAULTS: Settings = {
 function loadSettings(): Settings {
   const out: Settings = {
     hero: DEFAULTS.hero,
+    skyline: DEFAULTS.skyline,
     fahrenheit: DEFAULTS.fahrenheit,
     stepGoal: DEFAULTS.stepGoal,
     vibe: DEFAULTS.vibe,
@@ -84,9 +91,11 @@ function loadSettings(): Settings {
 
 function sanitize(raw: Partial<Settings>, base: Settings): Settings {
   const hero = Number(raw.hero);
+  const skyline = Number(raw.skyline);
   const goal = Number(raw.stepGoal);
   return {
     hero: hero >= 0 && hero <= 3 ? Math.floor(hero) : base.hero,
+    skyline: skyline >= 0 && skyline < SKYLINE_COUNT ? Math.floor(skyline) : base.skyline,
     fahrenheit: typeof raw.fahrenheit === "boolean" ? raw.fahrenheit : base.fahrenheit,
     stepGoal: goal >= 500 && goal <= 100000 ? Math.floor(goal) : base.stepGoal,
     vibe: typeof raw.vibe === "boolean" ? raw.vibe : base.vibe,
@@ -140,6 +149,7 @@ function sendSettings(): void {
   const s = loadSettings();
   send("settings", {
     HERO_COLOR: s.hero,
+    SKYLINE: s.skyline,
     FAHRENHEIT: s.fahrenheit ? 1 : 0,
     STEP_GOAL: s.stepGoal,
     VIBE_DISCONNECT: s.vibe ? 1 : 0,
@@ -349,6 +359,8 @@ function openConfig(): void {
   const s = loadSettings();
   const config = {
     hero: s.hero,
+    skyline: s.skyline,
+    previewBase: HA_CLIENT_ID + "previews/",
     fahrenheit: s.fahrenheit,
     stepGoal: s.stepGoal,
     vibe: s.vibe,

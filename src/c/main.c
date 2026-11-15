@@ -14,6 +14,7 @@
 
 #include <pebble.h>
 #include "scene.h"
+#include "skyline.h"
 
 // Weather older than this is shown as unknown rather than pretending.
 #define WEATHER_MAX_AGE_S (3 * 60 * 60)
@@ -31,6 +32,7 @@ enum {
   P_HERO,
   P_HA_TEMP,
   P_HA_TIME,
+  P_CITY,
 };
 
 // The phone sends this as HA_TEMP to switch the Home Assistant reading off.
@@ -87,6 +89,8 @@ static void load_settings(void) {
   s_vibe_disconnect = !persist_exists(P_VIBE) || persist_read_bool(P_VIBE);
   s_scene.hero = persist_exists(P_HERO) ? persist_read_int(P_HERO) : HERO_RED;
   if (s_scene.hero >= HERO_COUNT) s_scene.hero = HERO_RED;
+  s_scene.city = persist_exists(P_CITY) ? persist_read_int(P_CITY) : CITY_VIENNA;
+  if (s_scene.city >= CITY_COUNT) s_scene.city = CITY_VIENNA;
   if (s_scene.cond >= COND_COUNT) s_scene.cond = COND_UNKNOWN;
 }
 
@@ -164,6 +168,11 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     s_vibe_disconnect = tuple_int(t) != 0;
     persist_write_bool(P_VIBE, s_vibe_disconnect);
   }
+  if ((t = dict_find(it, MESSAGE_KEY_SKYLINE))) {
+    int32_t c = tuple_int(t);
+    s_scene.city = (c >= 0 && c < CITY_COUNT) ? c : CITY_VIENNA;
+    persist_write_int(P_CITY, s_scene.city);
+  }
   if ((t = dict_find(it, MESSAGE_KEY_HERO_COLOR))) {
     int32_t h = tuple_int(t);
     s_scene.hero = (h >= 0 && h < HERO_COUNT) ? h : HERO_RED;
@@ -240,6 +249,7 @@ static void apply_demo(void) {
   s_scene.is_day = !HERO_DEMO_NIGHT;
   s_scene.connected = !HERO_DEMO_DISC;
   s_scene.hero = HERO_DEMO_HERO;
+  s_scene.city = HERO_DEMO_CITY;
   s_scene.has_weather = true;
   s_scene.temp_tenths_c = HERO_DEMO_NIGHT ? -126 : 140;
   s_scene.has_ha_temp = true;

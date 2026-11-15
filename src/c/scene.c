@@ -19,6 +19,8 @@
 
 #include "scene.h"
 #include "comic.h"
+#include "layout.h"
+#include "skyline.h"
 
 static GFont s_time_font;
 static GFont s_small_font;
@@ -79,33 +81,6 @@ static HeroPalette hero_palette(uint8_t hero) {
  * Layout
  * ------------------------------------------------------------------------- */
 
-typedef struct {
-  int16_t w, h, g;
-  bool round;
-  GPoint a0, a1;  // SKY / ACTION border, at x = 0 and x = w
-  GPoint b0, b1;  // ACTION / bottom border
-  GPoint c0, c1;  // POWER / ENERGY border (top on line B, bottom at screen edge)
-  Region sky, mid, steps, batt;
-  GPoint caption;  // top-left of the date caption (round: top-centre)
-  GPoint weather;
-  int16_t wsize;
-  GPoint emblem;
-  int16_t erx, ery;
-  GPoint time_center;
-  GPoint steps_anchor, batt_anchor;
-  int16_t content_w;
-  int16_t lm_x[5];  // landmark positions (permille of width), see LM_*
-} Layout;
-
-enum { LM_RIESENRAD, LM_KARLSKIRCHE, LM_STEPHANSDOM, LM_DONAUTURM, LM_DC_TOWER };
-
-#define PM(v, total) ((int32_t)(v) * (total) / 1000)
-
-static int16_t line_y(GPoint a, GPoint b, int16_t x) {
-  if (b.x == a.x) return a.y;
-  return a.y + (int32_t)(b.y - a.y) * (x - a.x) / (b.x - a.x);
-}
-
 static void layout_compute(Layout *l, GRect bounds) {
   const int16_t w = bounds.size.w, h = bounds.size.h;
   l->w = w;
@@ -157,8 +132,6 @@ static void layout_compute(Layout *l, GRect bounds) {
     l->erx = PM(100, w);
     l->ery = PM(56, h);
     l->content_w = PM(230, w);
-    static const int16_t LM_ROUND[] = {130, 300, 440, 560, 820};
-    memcpy(l->lm_x, LM_ROUND, sizeof(l->lm_x));
     // Small round screens (chalk) need the two blocks pushed further apart.
     int16_t sx = PM(w < 200 ? 300 : 335, w), bx = PM(w < 200 ? 690 : 650, w);
     int16_t sy = line_y(l->b0, l->b1, sx) + g, by = line_y(l->b0, l->b1, bx) + g;
@@ -172,8 +145,6 @@ static void layout_compute(Layout *l, GRect bounds) {
     l->erx = PM(120, w);
     l->ery = PM(64, h);
     l->content_w = PM(400, w);
-    static const int16_t LM_RECT[] = {100, 300, 450, 600, 900};
-    memcpy(l->lm_x, LM_RECT, sizeof(l->lm_x));
     int16_t sx = PM(255, w), bx = PM(760, w);
     int16_t sy = line_y(l->b0, l->b1, sx) + g, by = line_y(l->b0, l->b1, bx) + g;
     l->steps_anchor = GPoint(sx, (sy + h) / 2);
@@ -218,10 +189,6 @@ NOINLINE static void bolt(GContext *ctx, GPoint c, int half_h, GColor fill, int 
 /* ---------------------------------------------------------------------------
  * SKY panel: sky, weather, skyline, hero signal, date caption
  * ------------------------------------------------------------------------- */
-
-typedef struct {
-  GColor sky, dot, building, window;
-} SkyPalette;
 
 static bool cond_is_wet(uint8_t c) {
   return c == COND_RAIN || c == COND_POURING || c == COND_SLEET || c == COND_THUNDER ||
@@ -361,178 +328,6 @@ NOINLINE static void weather_icon(GContext *ctx, const Layout *l, const Scene *s
   }
 }
 
-/* ---------------------------------------------------------------------------
- * Vienna skyline
- *
- * Landmarks are authored in "units" (pixels on the 228 px tall Pebble Time 2),
- * x centred on the landmark, y measured UP from its base on the panel border,
- * and scaled with the screen height. Everything is clipped to the sky panel.
- * ------------------------------------------------------------------------- */
-
-typedef struct {
-  int16_t cx, base, h;
-} Anchor;
-
-static Anchor anchor_at(const Layout *l, int16_t cx) {
-  return (Anchor){cx, line_y(l->a0, l->a1, cx) - l->g, l->h};
-}
-
-static GPoint ap(const Anchor *a, int x, int y) {
-  return GPoint(a->cx + x * a->h / 228, a->base - y * a->h / 228);
-}
-
-static int16_t au(const Anchor *a, int v) {
-  return v * a->h / 228;
-}
-
-NOINLINE static void a_poly(GContext *ctx, const Layout *l, const Anchor *a,
-                            const int8_t (*pts)[2], int n, GColor c) {
-  static Poly p;
-  p.n = n;
-  for (int i = 0; i < n; i++) p.p[i] = ap(a, pts[i][0], pts[i][1]);
-  poly_fill(ctx, &p, &l->sky, c);
-}
-
-/* Rectangle from (x0, y0) to (x1, y1) in units; y0 below 0 reaches under the slanted border. */
-NOINLINE static void a_rect(GContext *ctx, const Layout *l, const Anchor *a, int x0, int y0,
-                            int x1, int y1, GColor c) {
-  static Poly p;
-  p.n = 4;
-  p.p[0] = ap(a, x0, y1);
-  p.p[1] = ap(a, x1, y1);
-  p.p[2] = ap(a, x1, y0);
-  p.p[3] = ap(a, x0, y0);
-  poly_fill(ctx, &p, &l->sky, c);
-}
-
-/* Lit windows on a facade: a grid of 2x3 px lights, some on. */
-NOINLINE static void windows(GContext *ctx, const Layout *l, GRect r, int seed, bool night,
-                             GColor color) {
-  graphics_context_set_fill_color(ctx, color);
-  int k = 0;
-  for (int16_t wy = r.origin.y + 3; wy < r.origin.y + r.size.h - 2; wy += 6) {
-    for (int16_t wx = r.origin.x + 2; wx < r.origin.x + r.size.w - 2; wx += 5, k++) {
-      bool lit = night ? ((k * 7 + seed * 3) % 5 < 2) : ((k * 5 + seed) % 4 == 0);
-      if (!lit || !region_contains(&l->sky, GPoint(wx + 1, wy + 2))) continue;
-      if (!on_canvas(GPoint(wx + 1, wy + 1), 2)) continue;
-      graphics_fill_rect(ctx, GRect(wx, wy, 2, 3), 0, GCornerNone);
-    }
-  }
-}
-
-/* Gruenderzeit houses along the whole panel, behind the landmarks. */
-NOINLINE static void houses(GContext *ctx, const Layout *l, const SkyPalette *pal, bool night) {
-  int16_t x = -6;
-  for (int i = 0; x < l->w + 6; i++) {
-    // Low on purpose, so the landmarks stand out.
-    int16_t wu = 12 + (i * 7 % 4) * 3, hu = 6 + (i * 5 % 4) * 2;
-    Anchor a = anchor_at(l, x + au(&(Anchor){0, 0, l->h}, wu) / 2);
-    a_rect(ctx, l, &a, -wu / 2, -10, wu - wu / 2, hu, pal->building);
-    if (i % 3 == 0) {  // gable roof
-      const int8_t roof[][2] = {{-wu / 2, hu}, {wu - wu / 2, hu}, {0, hu + 5}};
-      a_poly(ctx, l, &a, roof, 3, pal->building);
-    } else if (i % 3 == 1) {  // mansard roof with a chimney
-      const int8_t roof[][2] = {{-wu / 2, hu}, {wu - wu / 2, hu}, {wu / 2 - 3, hu + 4},
-                                {-wu / 2 + 3, hu + 4}};
-      a_poly(ctx, l, &a, roof, 4, pal->building);
-      a_rect(ctx, l, &a, 2, hu + 3, 4, hu + 7, pal->building);
-    }
-    GPoint tl = ap(&a, -wu / 2, hu);
-    windows(ctx, l, GRect(tl.x, tl.y, au(&a, wu), au(&a, hu) + 6), i, night, pal->window);
-    x += au(&a, wu) + 1;
-  }
-}
-
-NOINLINE static void riesenrad(GContext *ctx, const Layout *l, const Anchor *a, GColor c) {
-  GPoint hub = ap(a, 0, 24);
-  int r = au(a, 16);
-  line_draw(ctx, ap(a, -10, -4), hub, &l->sky, c, 2);
-  line_draw(ctx, ap(a, 10, -4), hub, &l->sky, c, 2);
-  ellipse_outline(ctx, hub, r, r, c, 2);
-  for (int i = 0; i < 6; i++) {
-    int32_t ang = TRIG_MAX_ANGLE * i / 12;
-    int dx = r * cos_lookup(ang) / TRIG_MAX_RATIO, dy = r * sin_lookup(ang) / TRIG_MAX_RATIO;
-    line_draw(ctx, GPoint(hub.x - dx, hub.y - dy), GPoint(hub.x + dx, hub.y + dy), &l->sky, c, 1);
-  }
-  graphics_context_set_fill_color(ctx, c);
-  for (int i = 0; i < 10; i++) {  // gondolas
-    int32_t ang = TRIG_MAX_ANGLE * i / 10;
-    GPoint g = GPoint(hub.x + r * cos_lookup(ang) / TRIG_MAX_RATIO,
-                      hub.y + r * sin_lookup(ang) / TRIG_MAX_RATIO);
-    if (on_canvas(g, 3)) graphics_fill_rect(ctx, GRect(g.x - 1, g.y, 3, 3), 0, GCornerNone);
-  }
-  a_rect(ctx, l, a, -12, -10, 12, 2, c);
-}
-
-NOINLINE static void karlskirche(GContext *ctx, const Layout *l, const Anchor *a, GColor c) {
-  a_rect(ctx, l, a, -12, -10, 12, 11, c);              // church
-  a_rect(ctx, l, a, -6, 11, 6, 19, c);                 // drum
-  ellipse_fill(ctx, ap(a, 0, 19), au(a, 7), au(a, 7), &l->sky, c);  // dome
-  a_rect(ctx, l, a, -1, 25, 1, 31, c);                 // lantern
-  const int8_t pediment[][2] = {{-9, 11}, {9, 11}, {0, 16}};
-  a_poly(ctx, l, a, pediment, 3, c);
-  for (int side = -1; side <= 1; side += 2) {          // the two columns
-    a_rect(ctx, l, a, side * 15 - 2, -10, side * 15 + 2, 23, c);
-    a_rect(ctx, l, a, side * 15 - 3, 23, side * 15 + 3, 25, c);
-    a_rect(ctx, l, a, side * 15 - 1, 25, side * 15 + 1, 27, c);
-  }
-}
-
-NOINLINE static void stephansdom(GContext *ctx, const Layout *l, const Anchor *a, GColor c) {
-  a_rect(ctx, l, a, -17, -10, 11, 10, c);              // nave
-  const int8_t roof[][2] = {{-17, 10}, {11, 10}, {6, 22}, {-12, 22}};  // the steep roof
-  a_poly(ctx, l, a, roof, 4, c);
-  a_rect(ctx, l, a, 10, -10, 18, 28, c);               // south tower
-  const int8_t spire[][2] = {{10, 28}, {18, 28}, {14, 50}};
-  a_poly(ctx, l, a, spire, 3, c);
-  a_rect(ctx, l, a, -20, -10, -14, 16, c);             // north tower stump
-}
-
-/* Height (units) of the middle of the Donauturm's head, where the signal starts. */
-#define DONAUTURM_HEAD 40
-
-/* Slim shaft, a stacked cylindrical head (no funnel underneath, or it reads as
- * a wine glass), and the long antenna mast that makes it the Donauturm. */
-NOINLINE static void donauturm(GContext *ctx, const Layout *l, const Anchor *a, GColor c) {
-  const int8_t shaft[][2] = {{-3, -10}, {3, -10}, {2, 36}, {-2, 36}};
-  a_poly(ctx, l, a, shaft, 4, c);
-  a_rect(ctx, l, a, -5, 35, 5, 38, c);   // lower ring
-  a_rect(ctx, l, a, -7, 38, 7, 43, c);   // restaurant drum, the widest part
-  a_rect(ctx, l, a, -5, 43, 5, 45, c);   // roof
-  a_rect(ctx, l, a, -1, 45, 1, 52, c);   // mast
-  line_draw(ctx, ap(a, 0, 52), ap(a, 0, 58), &l->sky, c, 1);  // antenna tip
-}
-
-NOINLINE static void dc_tower(GContext *ctx, const Layout *l, const Anchor *a, GColor c,
-                              const SkyPalette *pal, bool night) {
-  const int8_t slab[][2] = {{-7, -10}, {7, -10}, {7, 36}, {0, 40}, {-7, 38}};
-  a_poly(ctx, l, a, slab, 5, c);
-  GPoint tl = ap(a, -7, 34);
-  windows(ctx, l, GRect(tl.x, tl.y, au(a, 14), au(a, 34)), 7, night, pal->window);
-}
-
-NOINLINE static void skyline(GContext *ctx, const Layout *l, const SkyPalette *pal, bool night) {
-  houses(ctx, l, pal, night);
-  const GColor c = pal->building;
-  Anchor a = anchor_at(l, PM(l->lm_x[LM_RIESENRAD], l->w));
-  riesenrad(ctx, l, &a, c);
-  a = anchor_at(l, PM(l->lm_x[LM_KARLSKIRCHE], l->w));
-  karlskirche(ctx, l, &a, c);
-  a = anchor_at(l, PM(l->lm_x[LM_STEPHANSDOM], l->w));
-  stephansdom(ctx, l, &a, c);
-  a = anchor_at(l, PM(l->lm_x[LM_DONAUTURM], l->w));
-  donauturm(ctx, l, &a, c);
-  a = anchor_at(l, PM(l->lm_x[LM_DC_TOWER], l->w));
-  dc_tower(ctx, l, &a, c, pal, night);
-}
-
-/* The hero signal beams out of the Donauturm's head (the beam is drawn before
- * the skyline, so the black tower sits in front of where it starts). */
-static GPoint signal_lamp(const Layout *l) {
-  Anchor a = anchor_at(l, PM(l->lm_x[LM_DONAUTURM], l->w));
-  return ap(&a, 0, DONAUTURM_HEAD);
-}
-
 static int32_t isqrt32(int32_t v) {
   if (v <= 0) return 0;
   int32_t x = v, y = (x + 1) / 2;
@@ -543,8 +338,8 @@ static int32_t isqrt32(int32_t v) {
   return x;
 }
 
-NOINLINE static void signal_beam(GContext *ctx, const Layout *l) {
-  GPoint o = signal_lamp(l);
+NOINLINE static void signal_beam(GContext *ctx, const Layout *l, uint8_t city) {
+  GPoint o = skyline_signal_source(l, city);
   GPoint e = l->emblem;
   int32_t dx = e.x - o.x, dy = e.y - o.y;
   int32_t len = isqrt32(dx * dx + dy * dy);
@@ -667,9 +462,9 @@ NOINLINE static void draw_sky(GContext *ctx, const Layout *l, const Scene *s) {
     }
   }
   precipitation(ctx, l, s);
-  if (s->connected) signal_beam(ctx, l);
+  if (s->connected) signal_beam(ctx, l, s->city);
   weather_icon(ctx, l, s, pal.sky);
-  skyline(ctx, l, &pal, !s->is_day);
+  skyline_draw(ctx, l, &pal, !s->is_day, s->city);
   emblem(ctx, l, s->connected);
   temperature(ctx, l, s);
 }

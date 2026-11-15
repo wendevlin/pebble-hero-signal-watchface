@@ -90,6 +90,12 @@
   }
   .status { font-weight: 600; margin: 4px 0 10px; word-break: break-all; }
   .hidden { display: none; }
+  .cities { display: flex; gap: 12px; overflow-x: auto; padding: 4px 4px 10px; scroll-snap-type: x mandatory; }
+  .city { flex: 0 0 auto; scroll-snap-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;
+          padding: 8px; background: #fff; border: 3px solid var(--ink); cursor: pointer; font: inherit; color: var(--ink); }
+  .city img { width: 200px; height: 104px; image-rendering: pixelated; border: 2px solid var(--ink); background: #ddd; }
+  .city span { font-family: Bangers, Impact, "Arial Black", sans-serif; font-size: 18px; letter-spacing: 1px; }
+  .city.selected { background: var(--yellow); box-shadow: 4px 4px 0 var(--ink); }
   .status.error { color: var(--red); }
   #haLogin label { display: block; margin: 12px 0 4px; font-weight: 600; }
   #haLogin label .hint { font-weight: normal; }
@@ -109,6 +115,12 @@
 </head>
 <body>
   <h1>Hero Signal!</h1>
+
+  <div class="panel">
+    <h2>City</h2>
+    <div class="cities" id="cities"></div>
+    <p class="hint" id="cityHint"></p>
+  </div>
 
   <div class="panel">
     <h2>Hero colour</h2>
@@ -205,6 +217,39 @@
   }
 
   radio('hero', String(config.hero));
+
+  // --- Skyline picker: a strip of watch previews (served from GitHub Pages) --
+  var CITIES = [
+    { key: 'vienna', name: 'Vienna', hint: 'Riesenrad, Karlskirche, Stephansdom, DC Tower. The signal beams from the Donauturm.' },
+    { key: 'new-york', name: 'New York', hint: 'Statue of Liberty, Brooklyn Bridge, Chrysler, One WTC. The signal beams from the Empire State Building.' },
+    { key: 'paris', name: 'Paris', hint: 'Sacré-Cœur, Arc de Triomphe, Notre-Dame, Panthéon. The signal beams from the Eiffel Tower.' },
+    { key: 'gargoyle-city', name: 'Gargoyle City', hint: 'A gothic noir metropolis: gargoyles, a cathedral, art deco spires and the dark tower the signal beams from.' },
+    { key: 'quackville', name: 'Quackville', hint: 'A cartoon duck town: windmill, duck water tower, town hall, a castle on the hill, and the lighthouse the signal beams from.' }
+  ];
+  var selectedCity = config.skyline || 0;
+  function renderCities() {
+    var box = $('cities');
+    box.innerHTML = '';
+    CITIES.forEach(function (city, i) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'city' + (i === selectedCity ? ' selected' : '');
+      var img = document.createElement('img');
+      img.src = config.previewBase + city.key + '.png';
+      img.alt = '';
+      img.onerror = function () { img.style.visibility = 'hidden'; };
+      var name = document.createElement('span');
+      name.textContent = city.name;
+      card.appendChild(img);
+      card.appendChild(name);
+      card.addEventListener('click', function () { selectedCity = i; renderCities(); });
+      box.appendChild(card);
+    });
+    $('cityHint').textContent = CITIES[selectedCity].hint;
+    var sel = box.children[selectedCity];
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+  renderCities();
   radio('unit', config.fahrenheit ? 'f' : 'c');
   $('vibe').checked = !!config.vibe;
   $('goal').value = config.stepGoal;
@@ -251,6 +296,7 @@
     var goal = parseInt($('goal').value, 10);
     return {
       hero: parseInt(radioValue('hero') || '0', 10),
+      skyline: selectedCity,
       fahrenheit: radioValue('unit') === 'f',
       stepGoal: isFinite(goal) ? goal : config.stepGoal,
       vibe: $('vibe').checked,

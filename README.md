@@ -29,6 +29,10 @@ from your phone without noticing.
   sensor, e.g. your living room.
 - **Power meter:** today's steps against your goal; turns green when you hit it.
 - **Energy meter:** battery level (the bolt turns green while charging).
+- **Five cities**, picked from previews in the settings: Vienna (signal from the
+  Donauturm), New York (Empire State Building), Paris (Eiffel Tower) and two
+  made-up ones: Gargoyle City, a gothic noir metropolis, and Quackville, a
+  cartoon duck town with a lighthouse.
 - **Four hero colours:** red, blue, green, purple.
 - Date in a comic caption box, German or English depending on the watch language.
 - 12/24 h follows the watch setting; °C/°F in the settings.
@@ -83,9 +87,11 @@ bun run emulator:emery   # install in the emulator with logs
 
 ### Screenshot / demo mode
 
-`HERO_DEMO="cond,night,disconnected,hero"` builds a fixed, fully populated
-scene. The condition codes are in `src/c/scene.h`, and the hero colours are
-0 red, 1 blue, 2 green and 3 purple.
+`HERO_DEMO="cond,night,disconnected,hero,city"` builds a fixed, fully
+populated scene. The condition codes are in `src/c/scene.h`, the hero colours
+are 0 red, 1 blue, 2 green and 3 purple, and the cities are listed in
+`src/c/skyline.h`. The settings previews in `docs/previews/` are the sky panel
+of `HERO_DEMO=1,0,0,0,<city>` on emery, enlarged 2×.
 
 ```sh
 HERO_DEMO=9,0,0,2 pebble build   # thunderstorm by day, green hero
@@ -103,6 +109,7 @@ The site is published from the `docs/` folder of `main`
 | `docs/index.html` | Landing page and future documentation home. Also the Home Assistant OAuth `client_id`. |
 | `docs/oauth/callback.html` | The registered OAuth `redirect_uri`. It hands a login code back to the Pebble app via `pebblejs://close#…` (see below for why the app doesn't use it today). |
 | `docs/screenshots/` | Screenshots used by the README and the site. |
+| `docs/previews/` | Skyline previews loaded by the settings page. |
 
 Home Assistant identifies apps by a URL (`client_id`) and requires a
 `redirect_uri` on the same host, so both live on this site (see

@@ -303,6 +303,9 @@
   if (config.ha.justConnected && config.ha.connected) {
     $('haOk').textContent = 'Connected! Pick the sensor below and save.';
     $('haOk').classList.remove('hidden');
+  } else if (config.ha.pending && !config.ha.connected) {
+    $('haOk').textContent = 'Still logging in to ' + config.ha.url + '… Close the settings and open them again in a few seconds.';
+    $('haOk').classList.remove('hidden');
   }
 
   // --- Home Assistant entity picker: a bottom sheet, floor > area > device ---
@@ -526,8 +529,8 @@
     checkHomeAssistant(url, function (ok, why) {
       if (ok) {
         modal('Home Assistant found!',
-          'Save & close to log in as ' + user + '. The watch shows the Home Assistant temperature once ' +
-          'the login worked; if it didn\'t, the reason is shown here next time.',
+          'Save & close to log in as ' + user + ', then open the settings again: they show whether the ' +
+          'login worked, and you pick your sensor there.',
           [{ label: 'Back', plain: true, onClick: hideModal },
            { label: 'Save & close', onClick: function () { loginAndClose(url, user, pass); } }]);
       } else {

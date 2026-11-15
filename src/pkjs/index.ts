@@ -418,6 +418,7 @@ function openConfig(): void {
       // Shown once: the outcome of the last login attempt.
       error: localStorage.getItem("haError") || "",
       justConnected: localStorage.getItem("haJustConnected") === "1",
+      pending: Date.now() - parseInt(localStorage.getItem("haPending") || "0", 10) < LOGIN_PENDING_MS,
     },
   };
   localStorage.removeItem("haError");
@@ -426,23 +427,15 @@ function openConfig(): void {
   Pebble.openURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
 
+// The Pebble app doesn't reopen the settings from PebbleKit JS, so the login's
+// outcome (haError / haJustConnected) waits for the user to open them again,
+// and haPending tells a page opened mid-login that the login is still running.
+const LOGIN_PENDING_MS = 60000;
+
 function haLoginFailed(url: string, message: string): void {
   console.log(LOG + "Home Assistant login failed: " + message);
+  localStorage.removeItem("haPending");
   localStorage.setItem("haError", "Couldn't log in to " + url + ": " + message + ".");
-  showLoginOutcome();
-}
-
-/**
- * Bring the settings back with the login outcome. The Pebble app may ignore a
- * page opened by PebbleKit JS after the settings closed; then the outcome is
- * shown the next time the settings open (it's kept until then).
- */
-function showLoginOutcome(): void {
-  try {
-    openConfig();
-  } catch (e) {
-    console.log(LOG + "could not reopen the settings: " + e);
-  }
 }
 
 /** POST JSON to a login-flow URL and interpret the answer. */
@@ -462,6 +455,7 @@ function haPasswordLogin(rawUrl: string, username: string, password: string, mfa
   if (!url || !username || !password) return;
   localStorage.setItem("haLastUrl", url);
   localStorage.setItem("haLastUser", username);
+  localStorage.setItem("haPending", String(Date.now()));
   loginFlowPost(url + "/auth/login_flow", loginFlowStartBody(HA_CLIENT_ID, HA_REDIRECT_URI), function (start) {
     if (start.kind !== "step") {
       haLoginFailed(url, start.kind === "error" ? start.message : "unexpected answer from Home Assistant");
@@ -510,8 +504,8 @@ function exchangeHaCode(url: string, code: string): void {
         saveSettings(s);
         console.log(LOG + "Home Assistant connected, " + list.length + " entities");
         localStorage.setItem("haJustConnected", "1");
+        localStorage.removeItem("haPending");
         refreshWeather();
-        showLoginOutcome();
       });
     },
   );

@@ -133,9 +133,9 @@ The settings page can't run that login itself: Home Assistant only opens
 `/auth/token` to other pages (CORS), not `/auth/login_flow`. So on Connect the
 page first checks that a Home Assistant answers at the address (via
 `/auth/token`), shows "found" or "can't reach" in a dialog, and only then
-closes with Save & close. After the login, the phone reopens the settings with
-the outcome. If the Pebble app ignores that, the outcome is shown the next
-time the settings open.
+closes with Save & close. The Pebble app doesn't let PebbleKit JS reopen the
+settings, so the outcome ("Connected!" or the error) is shown the next time
+they're opened. While the login is still running, they say so.
 
 ### Phone permissions
 

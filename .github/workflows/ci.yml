@@ -26,12 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      # The Pebble SDK installer builds its Python environment with uv.
+      - uses: astral-sh/setup-uv@v6
       - run: bun install
       - name: Install pebble-tool
-        run: pip install pebble-tool
+        run: uv tool install --python 3.12 pebble-tool
       - name: Install Pebble SDK
         run: yes | pebble sdk install 4.44
       - name: Build .pbw

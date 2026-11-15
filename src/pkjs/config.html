@@ -140,6 +140,8 @@
       <p class="hint">Enter the address you use to open Home Assistant (reachable from your phone, e.g. your Nabu Casa URL).</p>
       <input type="url" id="haUrl" placeholder="https://example.ui.nabu.casa" autocapitalize="off" autocorrect="off">
       <p><button class="btn small" id="haConnect" type="button">Connect</button></p>
+      <p class="status hidden" id="haStatus"></p>
+      <p class="hint">Local addresses (like <code>homeassistant.local:8123</code>) need your phone on the home Wi-Fi. If the login page stays blank, try your Nabu Casa or other external https address.</p>
     </div>
   </div>
 
@@ -241,10 +243,19 @@
     }
     return out;
   }
+  // Copies of isLocalHaHost / normalizeHaUrl from src/pkjs/ha.ts.
+  function isLocalHaHost(hostAndPort) {
+    var m = /^\[?([^\]/]+?)\]?(?::(\d+))?(?:\/.*)?$/.exec(hostAndPort);
+    if (!m) return false;
+    var host = m[1].toLowerCase();
+    if (m[2] === '8123') return true;
+    if (/\.(local|lan|home|internal|home\.arpa)$/.test(host) || host === 'localhost') return true;
+    return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+  }
   function normalizeUrl(input) {
     var url = (input || '').trim();
     if (!url) return '';
-    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    if (!/^https?:\/\//i.test(url)) url = (isLocalHaHost(url) ? 'http://' : 'https://') + url;
     return url.replace(/\/+$/, '');
   }
   $('haConnect').addEventListener('click', function () {
@@ -252,6 +263,10 @@
     if (!url) { $('haUrl').focus(); return; }
     var nonce = String(Math.floor(Math.random() * 1e9)) + '-' + String(Date.now());
     var state = base64UrlEncode(JSON.stringify({ u: url, n: nonce, s: settings() }));
+    // Feedback while Home Assistant loads; if it never does, the address is
+    // not reachable from this phone.
+    $('haStatus').textContent = 'Opening ' + url + ' …';
+    $('haStatus').classList.remove('hidden');
     window.location.href = url + '/auth/authorize?client_id=' +
       encodeURIComponent(config.ha.clientId) + '&redirect_uri=' +
       encodeURIComponent(config.ha.redirectUri) + '&response_type=code&state=' +

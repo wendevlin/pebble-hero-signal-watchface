@@ -23,13 +23,27 @@ export const HA_REDIRECT_URI =
   "https://wendevlin.github.io/pebble-casita-watchface/callback.html";
 
 /**
- * Normalize a user-entered Home Assistant URL: trim, default to https://, and
- * strip trailing slashes. Returns "" for empty input.
+ * A host Home Assistant typically serves over plain http: an mDNS name, a
+ * private IP or anything on HA's default port 8123.
+ */
+export function isLocalHaHost(hostAndPort: string): boolean {
+  const m = /^\[?([^\]/]+?)\]?(?::(\d+))?(?:\/.*)?$/.exec(hostAndPort);
+  if (!m) return false;
+  const host = m[1].toLowerCase();
+  if (m[2] === "8123") return true;
+  if (/\.(local|lan|home|internal|home\.arpa)$/.test(host) || host === "localhost") return true;
+  return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+}
+
+/**
+ * Normalize a user-entered Home Assistant URL: trim, add a scheme when missing
+ * (http:// for local addresses, https:// otherwise) and strip trailing slashes.
+ * Returns "" for empty input. config.html has a copy: keep them in sync.
  */
 export function normalizeHaUrl(input: string): string {
   let url = (input || "").trim();
   if (url === "") return "";
-  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  if (!/^https?:\/\//i.test(url)) url = (isLocalHaHost(url) ? "http://" : "https://") + url;
   return url.replace(/\/+$/, "");
 }
 

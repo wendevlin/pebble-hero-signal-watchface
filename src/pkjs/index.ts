@@ -393,6 +393,7 @@ function finishHaLogin(code: string, state: string): void {
         const s = loadSettings();
         if (!s.haEntity) s.haEntity = defaultTempEntity(list);
         saveSettings(s);
+        sendSettings();  // includes choices carried through the login
         console.log(LOG + "Home Assistant connected, " + list.length + " entities");
         // Back into the settings page, now connected, to confirm the entity.
         openConfig();

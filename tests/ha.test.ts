@@ -13,10 +13,27 @@ import {
 } from "../src/pkjs/ha";
 
 describe("Home Assistant OAuth helpers", () => {
-  test("normalizes URLs", () => {
-    expect(normalizeHaUrl(" homeassistant.local:8123/ ")).toBe("https://homeassistant.local:8123");
-    expect(normalizeHaUrl("http://10.0.0.2:8123//")).toBe("http://10.0.0.2:8123");
+  test("normalizes URLs: http for local addresses, https otherwise", () => {
+    expect(normalizeHaUrl(" homeassistant.local:8123/ ")).toBe("http://homeassistant.local:8123");
+    expect(normalizeHaUrl("192.168.1.20")).toBe("http://192.168.1.20");
+    expect(normalizeHaUrl("172.20.0.5:80")).toBe("http://172.20.0.5:80");
+    expect(normalizeHaUrl("ha.example.org:8123")).toBe("http://ha.example.org:8123");
+    expect(normalizeHaUrl("abc123.ui.nabu.casa")).toBe("https://abc123.ui.nabu.casa");
+    expect(normalizeHaUrl("172.40.0.5")).toBe("https://172.40.0.5");
+    expect(normalizeHaUrl("https://10.0.0.2:8123//")).toBe("https://10.0.0.2:8123");
     expect(normalizeHaUrl("")).toBe("");
+  });
+
+  test("the settings page normalizes URLs the same way (its own copy)", () => {
+    const html = readFileSync(new URL("../src/pkjs/config.html", import.meta.url), "utf8");
+    const local = html.match(/function isLocalHaHost\(hostAndPort\) \{[\s\S]*?\n  \}/);
+    const norm = html.match(/function normalizeUrl\(input\) \{[\s\S]*?\n  \}/);
+    expect(local).not.toBeNull();
+    expect(norm).not.toBeNull();
+    const pageNormalize = new Function(local![0] + norm![0] + "; return normalizeUrl;")();
+    for (const u of ["homeassistant.local:8123/", "192.168.1.20", "x.ui.nabu.casa", "http://a.b/", "10.1.1.1:8123"]) {
+      expect(pageNormalize(u)).toBe(normalizeHaUrl(u));
+    }
   });
 
   test("base64url round-trips UTF-8", () => {

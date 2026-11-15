@@ -488,13 +488,19 @@ NOINLINE static void stephansdom(GContext *ctx, const Layout *l, const Anchor *a
   a_rect(ctx, l, a, -20, -10, -14, 16, c);             // north tower stump
 }
 
-#define DONAUTURM_TOP 45
+/* Height (units) of the middle of the Donauturm's head, where the signal starts. */
+#define DONAUTURM_HEAD 40
 
+/* Slim shaft, a stacked cylindrical head (no funnel underneath, or it reads as
+ * a wine glass), and the long antenna mast that makes it the Donauturm. */
 NOINLINE static void donauturm(GContext *ctx, const Layout *l, const Anchor *a, GColor c) {
-  a_rect(ctx, l, a, -2, -10, 2, 38, c);                // shaft
-  const int8_t head[][2] = {{-2, 35}, {2, 35}, {6, 39}, {6, DONAUTURM_TOP},
-                            {-6, DONAUTURM_TOP}, {-6, 39}};
-  a_poly(ctx, l, a, head, 6, c);
+  const int8_t shaft[][2] = {{-3, -10}, {3, -10}, {2, 36}, {-2, 36}};
+  a_poly(ctx, l, a, shaft, 4, c);
+  a_rect(ctx, l, a, -5, 35, 5, 38, c);   // lower ring
+  a_rect(ctx, l, a, -7, 38, 7, 43, c);   // restaurant drum, the widest part
+  a_rect(ctx, l, a, -5, 43, 5, 45, c);   // roof
+  a_rect(ctx, l, a, -1, 45, 1, 52, c);   // mast
+  line_draw(ctx, ap(a, 0, 52), ap(a, 0, 58), &l->sky, c, 1);  // antenna tip
 }
 
 NOINLINE static void dc_tower(GContext *ctx, const Layout *l, const Anchor *a, GColor c,
@@ -524,7 +530,7 @@ NOINLINE static void skyline(GContext *ctx, const Layout *l, const SkyPalette *p
  * the skyline, so the black tower sits in front of where it starts). */
 static GPoint signal_lamp(const Layout *l) {
   Anchor a = anchor_at(l, PM(l->lm_x[LM_DONAUTURM], l->w));
-  return ap(&a, 0, DONAUTURM_TOP - 3);
+  return ap(&a, 0, DONAUTURM_HEAD);
 }
 
 static int32_t isqrt32(int32_t v) {

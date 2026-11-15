@@ -19,9 +19,7 @@ import CONFIG_PAGE from "./config.html" with { type: "text" };
 import {
   HA_CLIENT_ID,
   HA_REDIRECT_URI,
-  buildAuthorizeUrl,
   decodeState,
-  encodeState,
   normalizeHaUrl,
   tokenExchangeBody,
   tokenRefreshBody,
@@ -351,6 +349,8 @@ function openConfig(): void {
     stepGoal: s.stepGoal,
     vibe: s.vibe,
     ha: {
+      clientId: HA_CLIENT_ID,
+      redirectUri: HA_REDIRECT_URI,
       connected: haConnected(),
       url: localStorage.getItem("haUrl") || "",
       entity: s.haEntity,
@@ -361,17 +361,15 @@ function openConfig(): void {
   Pebble.openURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
 }
 
-function startHaLogin(rawUrl: string): void {
-  const url = normalizeHaUrl(rawUrl);
-  if (!url) return;
-  const nonce = String(Math.random()).slice(2);
-  Pebble.openURL(buildAuthorizeUrl(url, HA_CLIENT_ID, HA_REDIRECT_URI, encodeState(url, nonce)));
-}
-
 function finishHaLogin(code: string, state: string): void {
   let url = "";
   try {
-    url = normalizeHaUrl(decodeState(state).haUrl);
+    const decoded = decodeState(state);
+    url = normalizeHaUrl(decoded.haUrl);
+    // Choices made on the settings page before tapping Connect.
+    if (decoded.settings && typeof decoded.settings === "object") {
+      saveSettings(sanitize(decoded.settings as Partial<Settings>, loadSettings()));
+    }
   } catch (e) {
     console.log(LOG + "bad OAuth state");
     return;
@@ -427,7 +425,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
     action?: string;
     settings?: Partial<Settings>;
     haDisconnect?: boolean;
-    url?: string;
     code?: string;
     state?: string;
     error?: string;
@@ -436,10 +433,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
 
   if (msg.settings) saveSettings(sanitize(msg.settings, loadSettings()));
 
-  if (msg.action === "ha_login") {
-    startHaLogin(msg.url || "");
-    return;
-  }
   if (msg.action === "ha_code") {
     if (msg.error) {
       console.log(LOG + "Home Assistant login error: " + msg.error);

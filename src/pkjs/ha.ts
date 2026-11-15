@@ -2,6 +2,11 @@
  * Pure helpers for the Home Assistant OAuth flow (phone-side), adapted from
  * the Casita watchface. Unit-tested in tests/ha.test.ts.
  *
+ * The login starts IN the settings webview (config.html navigates to HA's
+ * authorize page itself; the Pebble app does not let PebbleKit JS open a new
+ * page after the settings closed). config.html therefore carries its own copy
+ * of base64UrlEncode and the state format: keep the two in sync.
+ *
  * Home Assistant uses IndieAuth-style OAuth2: `client_id` is a URL that
  * identifies the app, and `redirect_uri` must be on the same host. The
  * redirect lands on a tiny static page that bounces the auth code back into
@@ -92,17 +97,26 @@ export function base64UrlDecode(str: string): string {
 export interface HaState {
   haUrl: string;
   nonce: string;
+  /** The settings page's unsaved choices, restored after the login. */
+  settings: unknown;
 }
 
-/** Encode the HA URL (+ a random nonce) into an opaque, URL-safe state param. */
-export function encodeState(haUrl: string, nonce: string): string {
-  return base64UrlEncode(JSON.stringify({ u: haUrl, n: nonce }));
+/**
+ * Encode the HA URL, a random nonce and the page's current settings into an
+ * opaque, URL-safe state param (format: base64url(JSON {u, n, s})).
+ */
+export function encodeState(haUrl: string, nonce: string, settings?: unknown): string {
+  return base64UrlEncode(JSON.stringify({ u: haUrl, n: nonce, s: settings }));
 }
 
 /** Decode a state param produced by encodeState. Throws on malformed input. */
 export function decodeState(state: string): HaState {
   const obj = JSON.parse(base64UrlDecode(state));
-  return { haUrl: String(obj.u || ""), nonce: String(obj.n || "") };
+  return {
+    haUrl: String(obj.u || ""),
+    nonce: String(obj.n || ""),
+    settings: obj.s === undefined ? null : obj.s,
+  };
 }
 
 export function buildAuthorizeUrl(

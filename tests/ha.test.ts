@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   HA_CLIENT_ID,
   HA_REDIRECT_URI,
@@ -25,9 +26,25 @@ describe("Home Assistant OAuth helpers", () => {
     expect(base64UrlEncode("??>")).not.toMatch(/[+/=]/);
   });
 
-  test("state carries the HA URL", () => {
-    const state = encodeState("https://ha.example", "123");
-    expect(decodeState(state)).toEqual({ haUrl: "https://ha.example", nonce: "123" });
+  test("state carries the HA URL and the unsaved settings", () => {
+    const state = encodeState("https://ha.example", "123", { hero: 2 });
+    expect(decodeState(state)).toEqual({
+      haUrl: "https://ha.example",
+      nonce: "123",
+      settings: { hero: 2 },
+    });
+  });
+
+  test("the settings page encodes the state the same way (its own copy)", () => {
+    const html = readFileSync(new URL("../src/pkjs/config.html", import.meta.url), "utf8");
+    const b64 = html.match(/var B64 = '[^']+';/);
+    const fn = html.match(/function base64UrlEncode\(str\) \{[\s\S]*?\n  \}/);
+    expect(b64).not.toBeNull();
+    expect(fn).not.toBeNull();
+    const pageEncode = new Function(b64![0] + fn![0] + "; return base64UrlEncode;")();
+    const payload = JSON.stringify({ u: "https://ha.example", n: "1-2", s: { hero: 1, vibe: true } });
+    expect(pageEncode(payload)).toBe(base64UrlEncode(payload));
+    expect(decodeState(pageEncode(payload)).settings).toEqual({ hero: 1, vibe: true });
   });
 
   test("client id and redirect share a host (required by Home Assistant)", () => {

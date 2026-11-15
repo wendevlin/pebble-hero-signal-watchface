@@ -3,7 +3,7 @@
 A superhero comic watchface for Pebble. The time is lettered big in a comic
 panel full of speed lines and halftone dots. Above it, a hero signal shines over
 the Vienna skyline (Riesenrad, Karlskirche, Stephansdom, DC Tower, with the
-searchlight on top of the Donauturm) while your phone is connected. **When the connection drops, the
+signal beaming out of the Donauturm) while your phone is connected. **When the connection drops, the
 signal cuts out with a "KRZZT!" and the watch vibrates**, so you can't walk away
 from your phone without noticing.
 

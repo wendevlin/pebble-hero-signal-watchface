@@ -520,11 +520,11 @@ NOINLINE static void skyline(GContext *ctx, const Layout *l, const SkyPalette *p
   dc_tower(ctx, l, &a, c, pal, night);
 }
 
-/* The hero signal's searchlight sits on top of the Donauturm. */
+/* The hero signal beams out of the Donauturm's head (the beam is drawn before
+ * the skyline, so the black tower sits in front of where it starts). */
 static GPoint signal_lamp(const Layout *l) {
   Anchor a = anchor_at(l, PM(l->lm_x[LM_DONAUTURM], l->w));
-  GPoint top = ap(&a, 0, DONAUTURM_TOP);
-  return GPoint(top.x, top.y - (l->w / 40 + 2));
+  return ap(&a, 0, DONAUTURM_TOP - 3);
 }
 
 static int32_t isqrt32(int32_t v) {
@@ -552,21 +552,6 @@ NOINLINE static void signal_beam(GContext *ctx, const Layout *l) {
   beam.p[2] = GPoint(e.x + px, e.y + py);
   beam.p[3] = GPoint(e.x - px, e.y - py);
   poly_fill(ctx, &beam, &l->sky, GColorPastelYellow);
-}
-
-NOINLINE static void signal_lamp_draw(GContext *ctx, const Layout *l, bool on) {
-  GPoint p = signal_lamp(l);
-  int r = l->w / 40 + 1;
-  static Poly lamp;
-  lamp.n = 4;
-  lamp.p[0] = GPoint(p.x - r - 1, p.y + r + 1);
-  lamp.p[1] = GPoint(p.x + r + 1, p.y + r + 1);
-  lamp.p[2] = GPoint(p.x + r, p.y - r);
-  lamp.p[3] = GPoint(p.x - r, p.y - r);
-  poly_fill(ctx, &lamp, NULL, GColorDarkGray);
-  poly_outline(ctx, &lamp, GColorBlack, 1);
-  graphics_context_set_fill_color(ctx, on ? GColorYellow : GColorBlack);
-  graphics_fill_rect(ctx, GRect(p.x - r + 1, p.y - r + 1, 2 * r - 2, 2), 0, GCornerNone);
 }
 
 NOINLINE static void emblem(GContext *ctx, const Layout *l, bool on) {
@@ -679,7 +664,6 @@ NOINLINE static void draw_sky(GContext *ctx, const Layout *l, const Scene *s) {
   if (s->connected) signal_beam(ctx, l);
   weather_icon(ctx, l, s, pal.sky);
   skyline(ctx, l, &pal, !s->is_day);
-  signal_lamp_draw(ctx, l, s->connected);
   emblem(ctx, l, s->connected);
   temperature(ctx, l, s);
 }

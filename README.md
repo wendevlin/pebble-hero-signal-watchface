@@ -2,7 +2,8 @@
 
 A superhero comic watchface for Pebble. The time is lettered big in a comic
 panel full of speed lines and halftone dots. Above it, a hero signal shines over
-the city skyline while your phone is connected. **When the connection drops, the
+the Vienna skyline (Riesenrad, Karlskirche, Stephansdom, DC Tower, with the
+searchlight on top of the Donauturm) while your phone is connected. **When the connection drops, the
 signal cuts out with a "KRZZT!" and the watch vibrates**, so you can't walk away
 from your phone without noticing.
 
@@ -47,7 +48,8 @@ the face relies on colour.
 ## How it's built
 
 - **Watch (C, `src/c/`):** everything is drawn procedurally, with no bitmaps.
-  `comic.c` is a small comic toolkit: convex panels with polygon clipping
+  The Vienna landmarks in `scene.c` are small polygon drawings in
+  screen-height-relative units. `comic.c` is a small comic toolkit: convex panels with polygon clipping
   (Sutherland–Hodgman), Ben-Day halftone, speed rays, sound-effect bursts and
   outlined lettering. `scene.c` lays out the page for rectangular and round
   screens of any size, and `main.c` holds the state and watch services.

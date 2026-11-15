@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   Cond,
-  haConditionToCond,
-  haIsDay,
-  parseHaWeather,
+  defaultTempEntity,
+  parseHaTemp,
   parseOpenMeteo,
+  tempEntitiesFromStates,
   toTenthsC,
-  weatherEntitiesFromStates,
   wmoToCond,
 } from "../src/pkjs/weather";
 
@@ -32,30 +31,6 @@ describe("wmoToCond", () => {
   });
 });
 
-describe("Home Assistant conditions", () => {
-  test("maps every documented weather state", () => {
-    const states = [
-      "clear-night", "cloudy", "fog", "hail", "lightning", "lightning-rainy", "partlycloudy",
-      "pouring", "rainy", "snowy", "snowy-rainy", "sunny", "windy", "windy-variant",
-    ];
-    for (const s of states) expect(haConditionToCond(s)).not.toBe(Cond.UNKNOWN);
-  });
-
-  test("unknown and missing states", () => {
-    expect(haConditionToCond("exceptional")).toBe(Cond.UNKNOWN);
-    expect(haConditionToCond(null)).toBe(Cond.UNKNOWN);
-    expect(haConditionToCond("unavailable")).toBe(Cond.UNKNOWN);
-  });
-
-  test("day/night prefers sun.sun, then clear-night, then the clock", () => {
-    expect(haIsDay("below_horizon", "sunny", 12)).toBe(false);
-    expect(haIsDay("above_horizon", "clear-night", 2)).toBe(true);
-    expect(haIsDay(null, "clear-night", 12)).toBe(false);
-    expect(haIsDay(null, "rainy", 12)).toBe(true);
-    expect(haIsDay(null, "rainy", 23)).toBe(false);
-  });
-});
-
 describe("toTenthsC", () => {
   test("celsius and fahrenheit", () => {
     expect(toTenthsC(21.46, "°C")).toBe(215);
@@ -74,30 +49,42 @@ describe("parsers", () => {
     expect(parseOpenMeteo(null)).toBeNull();
   });
 
-  test("Home Assistant weather entity", () => {
-    const entity = {
-      entity_id: "weather.home",
-      state: "partlycloudy",
-      attributes: { temperature: 50, temperature_unit: "°F" },
-    };
-    expect(parseHaWeather(entity, "above_horizon", 9)).toEqual({
-      tenthsC: 100,
-      cond: Cond.PARTLY,
-      isDay: true,
-    });
-    expect(parseHaWeather({ state: "sunny", attributes: {} }, null, 9)).toBeNull();
+  test("Home Assistant weather entity and temperature sensor", () => {
+    expect(
+      parseHaTemp({
+        entity_id: "weather.home",
+        state: "partlycloudy",
+        attributes: { temperature: 50, temperature_unit: "°F" },
+      }),
+    ).toBe(100);
+    expect(
+      parseHaTemp({
+        entity_id: "sensor.living_room",
+        state: "21.4",
+        attributes: { unit_of_measurement: "°C", device_class: "temperature" },
+      }),
+    ).toBe(214);
+    expect(parseHaTemp({ entity_id: "sensor.x", state: "unavailable", attributes: {} })).toBeNull();
+    expect(parseHaTemp({ entity_id: "weather.x", state: "sunny", attributes: {} })).toBeNull();
+    expect(parseHaTemp(null)).toBeNull();
   });
 
-  test("weather entities from /api/states", () => {
+  test("entities: weather first, then temperature sensors, by name", () => {
     const states = [
-      { entity_id: "sensor.x", attributes: { friendly_name: "X" } },
+      { entity_id: "sensor.humidity", attributes: { device_class: "humidity", friendly_name: "H" } },
+      { entity_id: "sensor.kitchen", attributes: { device_class: "temperature", friendly_name: "Kitchen" } },
+      { entity_id: "sensor.attic", attributes: { device_class: "temperature", friendly_name: "Attic" } },
       { entity_id: "weather.home", attributes: { friendly_name: "Home" } },
-      { entity_id: "weather.forecast_attic" },
+      { entity_id: "light.x", attributes: {} },
     ];
-    expect(weatherEntitiesFromStates(states)).toEqual([
-      { entity_id: "weather.home", name: "Home" },
-      { entity_id: "weather.forecast_attic", name: "weather.forecast_attic" },
+    const list = tempEntitiesFromStates(states);
+    expect(list).toEqual([
+      { entity_id: "weather.home", name: "Home", kind: "weather" },
+      { entity_id: "sensor.attic", name: "Attic", kind: "sensor" },
+      { entity_id: "sensor.kitchen", name: "Kitchen", kind: "sensor" },
     ]);
-    expect(weatherEntitiesFromStates({})).toEqual([]);
+    expect(defaultTempEntity(list)).toBe("weather.home");
+    expect(defaultTempEntity([])).toBe("");
+    expect(tempEntitiesFromStates({})).toEqual([]);
   });
 });

@@ -50,6 +50,7 @@
       "STEP_GOAL",
       "VIBE_DISCONNECT",
       "HERO_COLOR",
+      "HA_TEMP",
       "REFRESH"
     ],
     "resources": {

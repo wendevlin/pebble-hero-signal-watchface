@@ -1,9 +1,10 @@
 /*
  * Pure weather helpers (phone-side, unit-tested in tests/weather.test.ts).
  *
- * The watch draws a small set of weather scenes; both weather sources are
- * mapped onto that set here. Keep `Cond` in sync with `WeatherCond` in
- * src/c/scene.h.
+ * The outdoor weather comes from the phone location (Open-Meteo) and is mapped
+ * onto the watch's weather scenes here; keep `Cond` in sync with `WeatherCond`
+ * in src/c/scene.h. Home Assistant adds a second temperature (a weather entity
+ * or a temperature sensor), shown on the watch as "12°/21°".
  */
 
 export const Cond = {
@@ -37,41 +38,6 @@ export function wmoToCond(code: number): CondCode {
   if (code === 95) return Cond.THUNDER;
   if (code === 96 || code === 99) return Cond.HAIL; // thunderstorm with hail
   return Cond.UNKNOWN;
-}
-
-const HA_CONDITIONS: { [state: string]: CondCode } = {
-  "clear-night": Cond.CLEAR,
-  sunny: Cond.CLEAR,
-  partlycloudy: Cond.PARTLY,
-  cloudy: Cond.CLOUDY,
-  fog: Cond.FOG,
-  rainy: Cond.RAIN,
-  pouring: Cond.POURING,
-  snowy: Cond.SNOW,
-  "snowy-rainy": Cond.SLEET,
-  lightning: Cond.THUNDER,
-  "lightning-rainy": Cond.THUNDER,
-  hail: Cond.HAIL,
-  windy: Cond.WIND,
-  "windy-variant": Cond.WIND,
-};
-
-/** Home Assistant `weather.*` entity state -> watch condition. */
-export function haConditionToCond(state: string | null | undefined): CondCode {
-  if (!state) return Cond.UNKNOWN;
-  const c = HA_CONDITIONS[state];
-  return c === undefined ? Cond.UNKNOWN : c;
-}
-
-/**
- * Day/night for a Home Assistant reading: the `sun.sun` entity when we have
- * it, otherwise the condition itself ("clear-night"), otherwise the clock.
- */
-export function haIsDay(sunState: string | null, condition: string | null, hour: number): boolean {
-  if (sunState === "above_horizon") return true;
-  if (sunState === "below_horizon") return false;
-  if (condition === "clear-night") return false;
-  return hour >= 7 && hour < 19;
 }
 
 /**
@@ -114,43 +80,54 @@ export interface HaStateObject {
   attributes?: {
     temperature?: unknown;
     temperature_unit?: string;
+    unit_of_measurement?: string;
+    device_class?: string;
     friendly_name?: string;
   };
 }
 
-/** Parse a `weather.*` state object (+ optional `sun.sun` state). */
-export function parseHaWeather(
-  entity: HaStateObject | null,
-  sunState: string | null,
-  hour: number,
-): WeatherReading | null {
-  if (!entity || !entity.attributes) return null;
-  const tenthsC = toTenthsC(entity.attributes.temperature, entity.attributes.temperature_unit);
-  if (tenthsC === null) return null;
-  const state = entity.state === undefined ? null : entity.state;
-  return {
-    tenthsC,
-    cond: haConditionToCond(state),
-    isDay: haIsDay(sunState, state, hour),
-  };
-}
-
-export interface WeatherEntity {
+/** A Home Assistant entity that can provide the second temperature. */
+export interface TempEntity {
   entity_id: string;
   name: string;
+  kind: "weather" | "sensor";
 }
 
-/** All `weather.*` entities from GET /api/states, sorted by name. */
-export function weatherEntitiesFromStates(states: unknown): WeatherEntity[] {
+/** `weather.*` entities and temperature sensors from GET /api/states. */
+export function tempEntitiesFromStates(states: unknown): TempEntity[] {
   if (!Array.isArray(states)) return [];
-  const out: WeatherEntity[] = [];
+  const out: TempEntity[] = [];
   for (const s of states as HaStateObject[]) {
     const id = s && typeof s.entity_id === "string" ? s.entity_id : "";
-    if (id.indexOf("weather.") !== 0) continue;
-    out.push({ entity_id: id, name: (s.attributes && s.attributes.friendly_name) || id });
+    const attrs = (s && s.attributes) || {};
+    let kind: "weather" | "sensor" | null = null;
+    if (id.indexOf("weather.") === 0) kind = "weather";
+    else if (id.indexOf("sensor.") === 0 && attrs.device_class === "temperature") kind = "sensor";
+    if (!kind) continue;
+    out.push({ entity_id: id, name: attrs.friendly_name || id, kind: kind });
   }
   out.sort(function (a, b) {
+    if (a.kind !== b.kind) return a.kind === "weather" ? -1 : 1;
     return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   });
   return out;
+}
+
+/** The entity to pre-select after logging in: a weather entity if there is one. */
+export function defaultTempEntity(list: TempEntity[]): string {
+  return list.length > 0 ? list[0].entity_id : "";
+}
+
+/**
+ * Temperature of a weather entity (attributes.temperature) or a temperature
+ * sensor (its state), in tenths of a degree Celsius.
+ */
+export function parseHaTemp(entity: HaStateObject | null): number | null {
+  if (!entity) return null;
+  const attrs = entity.attributes || {};
+  const id = entity.entity_id || "";
+  if (id.indexOf("weather.") === 0) {
+    return toTenthsC(attrs.temperature, attrs.temperature_unit);
+  }
+  return toTenthsC(entity.state, attrs.unit_of_measurement);
 }

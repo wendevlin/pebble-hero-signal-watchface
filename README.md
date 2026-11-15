@@ -19,18 +19,18 @@ from your phone without noticing.
 - **Weather drawn into the sky:** sun, moon and stars, clouds, fog, rain, snow,
   sleet, hail, thunder and wind, each as its own scene, with a day and a night
   sky.
-- **Weather source of your choice:**
-  - *Phone location* via [Open-Meteo](https://open-meteo.com/) (no API key).
-  - *Home Assistant:* log in from the settings page (OAuth, no long-lived
-    token to paste) and pick any `weather.*` entity. Day/night comes from
-    `sun.sun`. If Home Assistant can't be reached, the watch falls back to the
-    phone location.
+- **Outdoor weather** from the phone location via [Open-Meteo](https://open-meteo.com/)
+  (no API key): icon, sky and temperature.
+- **Plus a Home Assistant temperature**, shown next to it as `12°/21°`
+  (outside / Home Assistant). Log in from the settings page (OAuth, no
+  long-lived token to paste) and pick a `weather.*` entity or any temperature
+  sensor, e.g. your living room.
 - **Power meter:** today's steps against your goal; turns green when you hit it.
 - **Energy meter:** battery level (the bolt turns green while charging).
 - **Four hero colours:** red, blue, green, purple.
 - Date in a comic caption box, German or English depending on the watch language.
 - 12/24 h follows the watch setting; °C/°F in the settings.
-- Weather older than 3 hours is shown as unknown instead of pretending.
+- Readings older than 3 hours are hidden instead of pretending.
 
 ## Platforms
 

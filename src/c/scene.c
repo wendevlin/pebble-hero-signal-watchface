@@ -498,20 +498,36 @@ NOINLINE static void date_caption(GContext *ctx, const Layout *l, const Scene *s
                      NULL);
 }
 
+static int degrees(int32_t tenths_c, bool fahrenheit) {
+  int32_t t10 = fahrenheit ? tenths_c * 9 / 5 + 320 : tenths_c;
+  return (t10 >= 0 ? t10 + 5 : t10 - 5) / 10;
+}
+
+/* Outdoor temperature, plus the Home Assistant one when set: "12°/21°". */
 NOINLINE static void temperature(GContext *ctx, const Layout *l, const Scene *s) {
-  char text[12];
+  char text[20];
+  int n;
   if (s->has_weather) {
-    int32_t t10 = s->temp_tenths_c;
-    if (s->fahrenheit) t10 = t10 * 9 / 5 + 320;
-    int32_t deg = (t10 >= 0 ? t10 + 5 : t10 - 5) / 10;
-    snprintf(text, sizeof(text), "%d°", (int)deg);
+    n = snprintf(text, sizeof(text), "%d°", degrees(s->temp_tenths_c, s->fahrenheit));
   } else {
-    snprintf(text, sizeof(text), "--°");
+    n = snprintf(text, sizeof(text), "--°");
+  }
+  if (s->has_ha_temp && n > 0 && n < (int)sizeof(text)) {
+    snprintf(text + n, sizeof(text) - n, "/%d°", degrees(s->ha_tenths_c, s->fahrenheit));
   }
   GSize sz = text_size(text, s_small_font);
   GPoint c = l->weather;
   int16_t ty = c.y + l->wsize * (l->round ? 12 : 11) / 10;
   GRect box = GRect(c.x - sz.w / 2 - 10, ty - sz.h * 30 / 100, sz.w + 20, sz.h + 4);
+  // Keep the (possibly wide) text on screen: shift it left of the right edge,
+  // which on a round screen is the circle at the text's height.
+  int16_t right = l->w - l->g - 1;
+  if (l->round) {
+    int32_t r = l->w / 2, dy = ty + sz.h / 3 - r;
+    right = r + isqrt32(r * r - dy * dy) - 6;
+  }
+  int16_t overflow = box.origin.x + box.size.w - 8 - right;
+  if (overflow > 0) box.origin.x -= overflow;
   comic_text(ctx, text, s_small_font, box, GTextAlignmentCenter, GColorWhite, GColorBlack, 2,
              GPoint(2, 2));
 }

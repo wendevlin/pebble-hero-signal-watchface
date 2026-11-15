@@ -2,9 +2,9 @@
  * Phone-side PebbleKit JS for Hero Signal.
  *
  * - Settings page (src/pkjs/config.html) and pushing the settings to the watch.
- * - Weather, from the phone's location via Open-Meteo (no API key) or from a
- *   Home Assistant `weather.*` entity. Home Assistant falls back to Open-Meteo
- *   when it can't be reached, so the watch never shows stale weather for long.
+ * - Outdoor weather from the phone's location via Open-Meteo (no API key).
+ * - Optionally a second temperature from Home Assistant (a `weather.*` entity
+ *   or a temperature sensor), shown on the watch next to it: "12°/21°".
  *
  * The WATCH drives the refresh cadence (it sends REFRESH every 30 minutes and
  * whenever the phone reconnects): phone-side timers stall while the Pebble app
@@ -27,11 +27,12 @@ import {
   tokenRefreshBody,
 } from "./ha";
 import {
-  parseHaWeather,
+  defaultTempEntity,
+  parseHaTemp,
   parseOpenMeteo,
-  weatherEntitiesFromStates,
+  tempEntitiesFromStates,
   type HaStateObject,
-  type WeatherEntity,
+  type TempEntity,
   type WeatherReading,
 } from "./weather";
 
@@ -41,6 +42,8 @@ const CONFIG_HTML = CONFIG_PAGE as unknown as string;
 
 const LOG = "Hero Signal: ";
 const POSITION_MAX_AGE_MS = 30 * 60 * 1000;
+// HA_TEMP value that switches the Home Assistant temperature off on the watch.
+const HA_TEMP_NONE = -32768;
 
 // --- Settings -----------------------------------------------------------------
 
@@ -49,7 +52,7 @@ interface Settings {
   fahrenheit: boolean;
   stepGoal: number;
   vibe: boolean;
-  source: "location" | "ha";
+  /** Home Assistant entity for the second temperature; "" = off. */
   haEntity: string;
 }
 
@@ -58,7 +61,6 @@ const DEFAULTS: Settings = {
   fahrenheit: false,
   stepGoal: 8000,
   vibe: true,
-  source: "location",
   haEntity: "",
 };
 
@@ -68,7 +70,6 @@ function loadSettings(): Settings {
     fahrenheit: DEFAULTS.fahrenheit,
     stepGoal: DEFAULTS.stepGoal,
     vibe: DEFAULTS.vibe,
-    source: DEFAULTS.source,
     haEntity: DEFAULTS.haEntity,
   };
   try {
@@ -87,7 +88,6 @@ function sanitize(raw: Partial<Settings>, base: Settings): Settings {
     fahrenheit: typeof raw.fahrenheit === "boolean" ? raw.fahrenheit : base.fahrenheit,
     stepGoal: goal >= 500 && goal <= 100000 ? Math.floor(goal) : base.stepGoal,
     vibe: typeof raw.vibe === "boolean" ? raw.vibe : base.vibe,
-    source: raw.source === "ha" ? "ha" : raw.source === "location" ? "location" : base.source,
     haEntity: typeof raw.haEntity === "string" ? raw.haEntity : base.haEntity,
   };
 }
@@ -144,9 +144,13 @@ function sendSettings(): void {
   });
 }
 
-function sendWeather(w: WeatherReading, source: string): void {
-  console.log(LOG + source + " weather " + w.tenthsC / 10 + "°C cond " + w.cond + " day " + w.isDay);
+function sendWeather(w: WeatherReading): void {
+  console.log(LOG + "weather " + w.tenthsC / 10 + "°C cond " + w.cond + " day " + w.isDay);
   send("weather", { WEATHER_TEMP: w.tenthsC, WEATHER_COND: w.cond, IS_DAY: w.isDay ? 1 : 0 });
+}
+
+function sendHaTemp(tenthsC: number): void {
+  send("Home Assistant temperature", { HA_TEMP: tenthsC });
 }
 
 // --- HTTP ---------------------------------------------------------------------
@@ -214,7 +218,7 @@ function fetchOpenMeteo(lat: number, lon: number): void {
   request("GET", url, {}, null, function (status, text) {
     const reading = status === 200 ? parseOpenMeteo(parseJson(text)) : null;
     if (reading) {
-      sendWeather(reading, "Open-Meteo");
+      sendWeather(reading);
     } else {
       console.log(LOG + "Open-Meteo failed (" + status + ")");
     }
@@ -233,9 +237,9 @@ function clearHa(): void {
   });
 }
 
-function cachedEntities(): WeatherEntity[] {
+function cachedEntities(): TempEntity[] {
   const list = parseJson(localStorage.getItem("haEntities") || "[]");
-  return Array.isArray(list) ? (list as WeatherEntity[]) : [];
+  return Array.isArray(list) ? (list as TempEntity[]) : [];
 }
 
 function storeToken(token: { access_token?: string; refresh_token?: string; expires_in?: number }): void {
@@ -299,43 +303,42 @@ function haGet(path: string, cb: (data: unknown) => void): void {
   });
 }
 
-function fetchHaEntities(cb: (list: WeatherEntity[]) => void): void {
+function fetchHaEntities(cb: (list: TempEntity[]) => void): void {
   haGet("/api/states", function (states) {
-    const list = weatherEntitiesFromStates(states);
+    // Keep the cached list when Home Assistant is unreachable.
+    if (!Array.isArray(states)) {
+      cb(cachedEntities());
+      return;
+    }
+    const list = tempEntitiesFromStates(states);
     localStorage.setItem("haEntities", JSON.stringify(list));
     cb(list);
   });
 }
 
-function fetchHaWeather(entity: string): void {
+function haTempActive(): boolean {
+  return haConnected() && !!loadSettings().haEntity;
+}
+
+/** Fetch the chosen Home Assistant temperature and forward it to the watch. */
+function refreshHaTemp(): void {
+  if (!haTempActive()) return;
+  const entity = loadSettings().haEntity;
   haGet("/api/states/" + encodeURIComponent(entity), function (data) {
-    if (!data) {
-      console.log(LOG + "Home Assistant unreachable, using phone location");
-      fetchLocationWeather();
+    const tenths = parseHaTemp(data as HaStateObject | null);
+    if (tenths === null) {
+      // The watch keeps the last value and hides it once it is 3 hours old.
+      console.log(LOG + "no Home Assistant temperature from " + entity);
       return;
     }
-    haGet("/api/states/sun.sun", function (sun) {
-      const sunState = sun && typeof (sun as HaStateObject).state === "string"
-        ? (sun as HaStateObject).state || null
-        : null;
-      const reading = parseHaWeather(data as HaStateObject, sunState, new Date().getHours());
-      if (reading) {
-        sendWeather(reading, "Home Assistant");
-      } else {
-        console.log(LOG + entity + " has no temperature, using phone location");
-        fetchLocationWeather();
-      }
-    });
+    console.log(LOG + "Home Assistant " + entity + " " + tenths / 10 + "°C");
+    sendHaTemp(tenths);
   });
 }
 
 function refreshWeather(): void {
-  const s = loadSettings();
-  if (s.source === "ha" && haConnected() && s.haEntity) {
-    fetchHaWeather(s.haEntity);
-  } else {
-    fetchLocationWeather();
-  }
+  fetchLocationWeather();
+  refreshHaTemp();
 }
 
 // --- Settings page -------------------------------------------------------------
@@ -347,7 +350,6 @@ function openConfig(): void {
     fahrenheit: s.fahrenheit,
     stepGoal: s.stepGoal,
     vibe: s.vibe,
-    source: s.source,
     ha: {
       connected: haConnected(),
       url: localStorage.getItem("haUrl") || "",
@@ -389,12 +391,11 @@ function finishHaLogin(code: string, state: string): void {
       localStorage.setItem("haUrl", url);
       storeToken(token);
       fetchHaEntities(function (list) {
-        // Pick the first weather entity unless one is already chosen.
+        // Pre-select an entity (a weather entity if there is one) unless one is chosen.
         const s = loadSettings();
-        s.source = "ha";
-        if (!s.haEntity && list.length > 0) s.haEntity = list[0].entity_id;
+        if (!s.haEntity) s.haEntity = defaultTempEntity(list);
         saveSettings(s);
-        console.log(LOG + "Home Assistant connected, " + list.length + " weather entities");
+        console.log(LOG + "Home Assistant connected, " + list.length + " entities");
         // Back into the settings page, now connected, to confirm the entity.
         openConfig();
         refreshWeather();
@@ -449,5 +450,6 @@ Pebble.addEventListener("webviewclosed", function (e) {
   }
   if (msg.haDisconnect) clearHa();
   sendSettings();
+  if (!haTempActive()) sendHaTemp(HA_TEMP_NONE);
   refreshWeather();
 });

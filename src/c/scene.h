@@ -35,6 +35,9 @@ typedef struct {
 
   bool has_weather;
   int16_t temp_tenths_c;
+  /* Optional second temperature from Home Assistant, shown as "12°/21°". */
+  bool has_ha_temp;
+  int16_t ha_tenths_c;
   uint8_t cond;
   bool is_day;
   bool fahrenheit;

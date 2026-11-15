@@ -116,33 +116,30 @@
 
   <div class="panel">
     <h2>Weather</h2>
-    <div class="choices">
-      <input type="radio" name="source" id="srcLoc" value="location"><label for="srcLoc">Phone location</label>
-      <input type="radio" name="source" id="srcHa" value="ha"><label for="srcHa">Home Assistant</label>
-    </div>
-
-    <div id="haBox" class="hidden">
-      <div id="haConnected" class="hidden">
-        <p class="status">Connected to <span id="haUrlText"></span></p>
-        <label for="haEntity">Weather entity</label>
-        <select id="haEntity"></select>
-        <p class="hint" id="haNoEntities">No <code>weather.*</code> entities found. Add a weather integration in Home Assistant (e.g. Met.no).</p>
-        <p><button class="btn small danger" id="haDisconnect" type="button">Disconnect</button></p>
-      </div>
-      <div id="haLogin" class="hidden">
-        <p class="hint">Enter the address you use to open Home Assistant (reachable from your phone, e.g. your Nabu Casa URL).</p>
-        <input type="url" id="haUrl" placeholder="https://example.ui.nabu.casa" autocapitalize="off" autocorrect="off">
-        <p><button class="btn small" id="haConnect" type="button">Connect</button></p>
-      </div>
-      <p class="hint">If Home Assistant cannot be reached, the watch falls back to the phone location weather.</p>
-    </div>
-
+    <p class="hint">The sky shows the weather at your phone's location (Open-Meteo).</p>
     <div class="row">
       <label>Temperature</label>
       <div class="choices">
         <input type="radio" name="unit" id="unitC" value="c"><label for="unitC">°C</label>
         <input type="radio" name="unit" id="unitF" value="f"><label for="unitF">°F</label>
       </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Home Assistant</h2>
+    <p class="hint">Add a second temperature from Home Assistant. The watch then shows both, e.g. <b>12°/21°</b> (outside / Home Assistant).</p>
+    <div id="haConnected" class="hidden">
+      <p class="status">Connected to <span id="haUrlText"></span></p>
+      <label for="haEntity">Temperature from</label>
+      <select id="haEntity"></select>
+      <p class="hint" id="haNoEntities">No weather entities or temperature sensors found.</p>
+      <p><button class="btn small danger" id="haDisconnect" type="button">Disconnect</button></p>
+    </div>
+    <div id="haLogin" class="hidden">
+      <p class="hint">Enter the address you use to open Home Assistant (reachable from your phone, e.g. your Nabu Casa URL).</p>
+      <input type="url" id="haUrl" placeholder="https://example.ui.nabu.casa" autocapitalize="off" autocorrect="off">
+      <p><button class="btn small" id="haConnect" type="button">Connect</button></p>
     </div>
   </div>
 
@@ -173,34 +170,37 @@
   }
 
   radio('hero', String(config.hero));
-  radio('source', config.source);
   radio('unit', config.fahrenheit ? 'f' : 'c');
   $('vibe').checked = !!config.vibe;
   $('goal').value = config.stepGoal;
   $('haUrl').value = config.ha.url || '';
 
   var select = $('haEntity');
-  (config.ha.entities || []).forEach(function (e) {
+  var entities = config.ha.entities || [];
+  function option(parent, value, text) {
     var opt = document.createElement('option');
-    opt.value = e.entity_id;
-    opt.textContent = e.name + ' (' + e.entity_id + ')';
-    if (e.entity_id === config.ha.entity) opt.selected = true;
-    select.appendChild(opt);
+    opt.value = value;
+    opt.textContent = text;
+    if (value === config.ha.entity) opt.selected = true;
+    parent.appendChild(opt);
+  }
+  option(select, '', 'Off (outside temperature only)');
+  [['weather', 'Weather'], ['sensor', 'Temperature sensors']].forEach(function (group) {
+    var items = entities.filter(function (e) { return e.kind === group[0]; });
+    if (!items.length) return;
+    var og = document.createElement('optgroup');
+    og.label = group[1];
+    items.forEach(function (e) { option(og, e.entity_id, e.name + ' (' + e.entity_id + ')'); });
+    select.appendChild(og);
   });
-  $('haNoEntities').classList.toggle('hidden', (config.ha.entities || []).length > 0);
-  select.classList.toggle('hidden', (config.ha.entities || []).length === 0);
+  $('haNoEntities').classList.toggle('hidden', entities.length > 0);
 
   function render() {
-    var ha = radioValue('source') === 'ha';
     var connected = config.ha.connected && !disconnectRequested;
-    $('haBox').classList.toggle('hidden', !ha);
     $('haConnected').classList.toggle('hidden', !connected);
     $('haLogin').classList.toggle('hidden', connected);
     $('haUrlText').textContent = config.ha.url;
   }
-  Array.prototype.forEach.call(document.querySelectorAll('input[name="source"]'), function (el) {
-    el.addEventListener('change', render);
-  });
   render();
 
   function settings() {
@@ -210,8 +210,7 @@
       fahrenheit: radioValue('unit') === 'f',
       stepGoal: isFinite(goal) ? goal : config.stepGoal,
       vibe: $('vibe').checked,
-      source: radioValue('source') || 'location',
-      haEntity: select.value || ''
+      haEntity: disconnectRequested ? '' : (select.value || '')
     };
   }
   function close(payload) {

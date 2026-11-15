@@ -29,13 +29,19 @@ enum {
   P_STEP_GOAL,
   P_VIBE,
   P_HERO,
+  P_HA_TEMP,
+  P_HA_TIME,
 };
+
+// The phone sends this as HA_TEMP to switch the Home Assistant reading off.
+#define HA_TEMP_NONE (-32768)
 
 static Window *s_window;
 static Layer *s_layer;
 static Scene s_scene;
 static bool s_vibe_disconnect = true;
 static time_t s_weather_time;
+static time_t s_ha_time;
 
 /* ---------------------------------------------------------------------------
  * State helpers
@@ -49,6 +55,7 @@ static void refresh_weather_validity(void) {
   time_t now = time(NULL);
   bool fresh = s_weather_time != 0 && now - s_weather_time < WEATHER_MAX_AGE_S;
   s_scene.has_weather = fresh;
+  s_scene.has_ha_temp = s_ha_time != 0 && now - s_ha_time < WEATHER_MAX_AGE_S;
   if (!fresh) {
     s_scene.cond = COND_UNKNOWN;
     s_scene.is_day = daytime_fallback(&s_scene.now);
@@ -70,6 +77,8 @@ static void update_steps(void) {
 
 static void load_settings(void) {
   if (persist_exists(P_TEMP)) s_scene.temp_tenths_c = persist_read_int(P_TEMP);
+  if (persist_exists(P_HA_TEMP)) s_scene.ha_tenths_c = persist_read_int(P_HA_TEMP);
+  if (persist_exists(P_HA_TIME)) s_ha_time = persist_read_int(P_HA_TIME);
   if (persist_exists(P_COND)) s_scene.cond = persist_read_int(P_COND);
   if (persist_exists(P_IS_DAY)) s_scene.is_day = persist_read_bool(P_IS_DAY);
   if (persist_exists(P_WEATHER_TIME)) s_weather_time = persist_read_int(P_WEATHER_TIME);
@@ -114,6 +123,17 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     s_scene.temp_tenths_c = tuple_int(t);
     persist_write_int(P_TEMP, s_scene.temp_tenths_c);
     weather = true;
+  }
+  if ((t = dict_find(it, MESSAGE_KEY_HA_TEMP))) {
+    int32_t v = tuple_int(t);
+    if (v == HA_TEMP_NONE) {
+      s_ha_time = 0;
+    } else {
+      s_scene.ha_tenths_c = v;
+      s_ha_time = time(NULL);
+      persist_write_int(P_HA_TEMP, v);
+    }
+    persist_write_int(P_HA_TIME, s_ha_time);
   }
   if ((t = dict_find(it, MESSAGE_KEY_WEATHER_COND))) {
     int32_t c = tuple_int(t);
@@ -221,7 +241,9 @@ static void apply_demo(void) {
   s_scene.connected = !HERO_DEMO_DISC;
   s_scene.hero = HERO_DEMO_HERO;
   s_scene.has_weather = true;
-  s_scene.temp_tenths_c = 140;
+  s_scene.temp_tenths_c = HERO_DEMO_NIGHT ? -126 : 140;
+  s_scene.has_ha_temp = true;
+  s_scene.ha_tenths_c = 215;
   s_scene.has_steps = true;
   s_scene.steps = 6420;
   s_scene.step_goal = 8000;

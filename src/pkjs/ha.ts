@@ -2,25 +2,23 @@
  * Pure helpers for the Home Assistant OAuth flow (phone-side), adapted from
  * the Casita watchface. Unit-tested in tests/ha.test.ts.
  *
+ * Home Assistant uses IndieAuth-style OAuth2: `client_id` is a URL that
+ * identifies the app, and `redirect_uri` must be on the same host. Both live on
+ * this repo's GitHub Pages site (served from /docs):
+ *   - client_id:    the site root (docs/index.html, also the future docs home)
+ *   - redirect_uri: docs/oauth/callback.html, which bounces the auth code back
+ *                   into the Pebble app via `pebblejs://close#...`
+ * The callback URL is baked into every released .pbw: don't move that file.
+ *
  * The login starts IN the settings webview (config.html navigates to HA's
  * authorize page itself; the Pebble app does not let PebbleKit JS open a new
  * page after the settings closed). config.html therefore carries its own copy
  * of base64UrlEncode and the state format: keep the two in sync.
- *
- * Home Assistant uses IndieAuth-style OAuth2: `client_id` is a URL that
- * identifies the app, and `redirect_uri` must be on the same host. The
- * redirect lands on a tiny static page that bounces the auth code back into
- * the Pebble app via `pebblejs://close#...` (see docs/callback.html).
- *
- * Until this project has its own GitHub Pages site, the redirect reuses the
- * identical callback page already published by the Casita watchface. Both live
- * on wendevlin.github.io, so Home Assistant accepts the pair. Once Pages is
- * enabled for this repo, point HA_REDIRECT_URI at its own docs/callback.html.
  */
 
-export const HA_CLIENT_ID = "https://wendevlin.github.io/pebble-hero-signal/";
+export const HA_CLIENT_ID = "https://wendevlin.github.io/pebble-hero-signal-watchface/";
 export const HA_REDIRECT_URI =
-  "https://wendevlin.github.io/pebble-casita-watchface/callback.html";
+  "https://wendevlin.github.io/pebble-hero-signal-watchface/oauth/callback.html";
 
 /**
  * A host Home Assistant typically serves over plain http: an mDNS name, a

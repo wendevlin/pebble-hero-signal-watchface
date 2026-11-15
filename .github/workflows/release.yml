@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & attach .pbw
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: bun install
+      - name: Install pebble-tool
+        run: pip install pebble-tool
+      - name: Install Pebble SDK
+        run: yes | pebble sdk install 4.44
+      - name: Test
+        run: bun test
+      - name: Build .pbw
+        run: bun run build
+      - name: Attach .pbw to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" build/*.pbw

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hero Signal</title>
+<meta name="description" content="A superhero comic watchface for Pebble with a Vienna skyline, a disconnect-aware hero signal and Home Assistant weather.">
+<!--
+  This page is also the Home Assistant OAuth client_id of the watchface
+  (src/pkjs/ha.ts). The link below tells Home Assistant (IndieAuth) where the
+  login may redirect to. Keep oauth/callback.html where it is: its URL is baked
+  into every released .pbw.
+-->
+<link rel="redirect_uri" href="https://wendevlin.github.io/pebble-hero-signal-watchface/oauth/callback.html">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bangers&display=swap">
+<style>
+  :root { --ink: #111; --paper: #fffdf4; --yellow: #ffe94d; --red: #e8262b; --sky: #5bb8ff; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px;
+    font-family: -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--ink);
+    background-color: var(--sky);
+    background-image: radial-gradient(rgba(255, 255, 255, 0.45) 2px, transparent 2.5px);
+    background-size: 12px 12px;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1, h2 { font-family: Bangers, Impact, "Arial Black", sans-serif; font-weight: normal; letter-spacing: 1px; }
+  h1 {
+    font-size: clamp(44px, 10vw, 76px); margin: 0 0 8px; color: var(--yellow);
+    -webkit-text-stroke: 2px var(--ink); text-shadow: 4px 4px 0 var(--ink); transform: rotate(-2deg);
+  }
+  .panel { background: var(--paper); border: 3px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); padding: 16px 18px; margin: 22px 0; }
+  .panel h2 { display: inline-block; margin: -32px 0 8px -6px; padding: 2px 12px; font-size: 24px; background: var(--yellow); border: 3px solid var(--ink); }
+  .shots { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+  .shots img { width: 160px; height: auto; image-rendering: pixelated; border: 3px solid var(--ink); background: #000; }
+  .shots img.round { border-radius: 50%; }
+  ul { line-height: 1.6; padding-left: 20px; }
+  a { color: #0b4fb3; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hero Signal!</h1>
+
+  <div class="panel">
+    <h2>The watchface</h2>
+    <p>A superhero comic watchface for Pebble. Comic-lettered time, the Vienna skyline, and a hero
+      signal beaming from the Donauturm, which cuts out with a <b>"KRZZT!"</b> when your phone disconnects.</p>
+    <div class="shots">
+      <img src="screenshots/sunny-emery.png" alt="Sunny day on Pebble Time 2">
+      <img class="round" src="screenshots/night-gabbro.png" alt="Night on Pebble Round 2">
+      <img src="screenshots/thunder-emery.png" alt="Thunderstorm on Pebble Time 2">
+      <img class="round" src="screenshots/lost-gabbro.png" alt="Phone disconnected on Pebble Round 2">
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Features</h2>
+    <ul>
+      <li>Phone connection at a glance: the signal goes out and the watch vibrates when the link drops.</li>
+      <li>Weather drawn into the sky, plus an optional Home Assistant temperature (<code>12°/21°</code>).</li>
+      <li>Steps and battery meters, four hero colours, Pebble Time 2, Round 2, Time and Time Round.</li>
+    </ul>
+    <p>Documentation is coming soon. Until then, see the
+      <a href="https://github.com/wendevlin/pebble-hero-signal-watchface">source code and README on GitHub</a>.</p>
+  </div>
+</main>
+</body>
+</html>

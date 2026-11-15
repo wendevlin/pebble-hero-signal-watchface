@@ -1,5 +1,5 @@
 {
-  "name": "hero-signal",
+  "name": "pebble-hero-signal-watchface",
   "author": "wendevlin",
   "version": "0.1.0",
   "description": "A superhero comic watchface: big comic-lettered time, a hero signal in the sky that cuts out when your phone disconnects, weather (location or Home Assistant), steps and battery.",
@@ -153,5 +153,10 @@
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "typescript": "^6.0.2"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wendevlin/pebble-hero-signal-watchface.git"
+  },
+  "homepage": "https://wendevlin.github.io/pebble-hero-signal-watchface/"
 }

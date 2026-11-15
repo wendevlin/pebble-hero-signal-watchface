@@ -68,6 +68,16 @@ describe("Home Assistant OAuth helpers", () => {
     expect(new URL(HA_CLIENT_ID).host).toBe(new URL(HA_REDIRECT_URI).host);
   });
 
+  test("the GitHub Pages site (docs/) serves the client id page and the callback", () => {
+    // docs/ is published at HA_CLIENT_ID, so the callback's path below it must exist.
+    expect(HA_REDIRECT_URI.startsWith(HA_CLIENT_ID)).toBe(true);
+    const callbackPath = HA_REDIRECT_URI.slice(HA_CLIENT_ID.length);
+    const callback = readFileSync(new URL("../docs/" + callbackPath, import.meta.url), "utf8");
+    expect(callback).toContain("pebblejs://close#");
+    const index = readFileSync(new URL("../docs/index.html", import.meta.url), "utf8");
+    expect(index).toContain('<link rel="redirect_uri" href="' + HA_REDIRECT_URI + '">');
+  });
+
   test("authorize URL and token body", () => {
     const url = buildAuthorizeUrl("https://ha.example", HA_CLIENT_ID, HA_REDIRECT_URI, "s");
     expect(url).toStartWith("https://ha.example/auth/authorize?client_id=https%3A%2F%2F");

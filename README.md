@@ -91,13 +91,25 @@ HERO_DEMO=9,0,0,2 pebble build   # thunderstorm by day, green hero
 HERO_DEMO=7,1,1,3 pebble build   # snowy night, phone disconnected, purple
 ```
 
-### Home Assistant login
+### GitHub Pages (`docs/`)
+
+The site is published from the `docs/` folder of `main`
+(Settings → Pages → Deploy from a branch → `main` / `/docs`) at
+<https://wendevlin.github.io/pebble-hero-signal-watchface/>.
+
+| Path | Purpose |
+| --- | --- |
+| `docs/index.html` | Landing page and future documentation home. Also the Home Assistant OAuth `client_id`. |
+| `docs/oauth/callback.html` | Home Assistant OAuth redirect: hands the login code back to the Pebble app via `pebblejs://close#…`. |
+| `docs/screenshots/` | Screenshots used by the README and the site. |
 
 Home Assistant identifies apps by a URL (`client_id`) and only redirects to the
-same host. The redirect currently reuses the identical callback page of the
-Casita watchface (same host, `wendevlin.github.io`). Once GitHub Pages is
-enabled for this repository, switch `HA_REDIRECT_URI` in `src/pkjs/ha.ts` to
-this repo's own `docs/callback.html`.
+same host, so both URLs live on this site (see `src/pkjs/ha.ts`). **Don't move
+`docs/oauth/callback.html`**: its URL is compiled into every released `.pbw`.
+Documentation can grow freely next to it. A test checks that the callback
+exists where the app expects it.
+
+The Home Assistant login only works once GitHub Pages is enabled.
 
 ### Phone permissions
 
@@ -109,3 +121,6 @@ domain list, together with `LocalNetwork` and `Location`.
 ## License
 
 Code: [MIT](./LICENSE). Font: Bangers, [SIL Open Font License 1.1](./resources/fonts/OFL.txt).
+
+The Home Assistant helpers and the settings-page approach are adapted from the
+[Casita watchface](https://github.com/wendevlin/pebble-casita-watchface).

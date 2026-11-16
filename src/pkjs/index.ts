@@ -201,6 +201,18 @@ function parseJson(text: string): unknown {
   }
 }
 
+// --- Status for the settings page ------------------------------------------------
+// The phone side runs out of sight, so it notes what happened last; the settings
+// page shows it ("Watch asked 3 min ago", "Weather: 14.2 °C, 3 min ago", …).
+
+type StatusKey = "watch" | "weather" | "ha";
+
+function noteStatus(key: StatusKey, ok: boolean, message: string): void {
+  const all = (parseJson(localStorage.getItem("status") || "{}") || {}) as { [k: string]: unknown };
+  all[key] = { at: Date.now(), ok: ok, msg: message };
+  localStorage.setItem("status", JSON.stringify(all));
+}
+
 // --- Weather: phone location (Open-Meteo) ------------------------------------
 
 function fetchLocationWeather(): void {
@@ -208,7 +220,7 @@ function fetchLocationWeather(): void {
     function (pos) {
       localStorage.setItem("lastLat", String(pos.coords.latitude));
       localStorage.setItem("lastLon", String(pos.coords.longitude));
-      fetchOpenMeteo(pos.coords.latitude, pos.coords.longitude);
+      fetchOpenMeteo(pos.coords.latitude, pos.coords.longitude, "current location");
     },
     function (err) {
       // In the background the phone often refuses a fresh fix; the last one is
@@ -216,16 +228,17 @@ function fetchLocationWeather(): void {
       const lat = parseFloat(localStorage.getItem("lastLat") || "");
       const lon = parseFloat(localStorage.getItem("lastLon") || "");
       if (isFinite(lat) && isFinite(lon)) {
-        fetchOpenMeteo(lat, lon);
+        fetchOpenMeteo(lat, lon, "last known location");
       } else {
         console.log(LOG + "no location: " + JSON.stringify(err));
+        noteStatus("weather", false, "no location from the phone (location permission?)");
       }
     },
     { timeout: 15000, maximumAge: POSITION_MAX_AGE_MS },
   );
 }
 
-function fetchOpenMeteo(lat: number, lon: number): void {
+function fetchOpenMeteo(lat: number, lon: number, where: string): void {
   const url =
     "https://api.open-meteo.com/v1/forecast?latitude=" + lat.toFixed(3) +
     "&longitude=" + lon.toFixed(3) +
@@ -234,8 +247,10 @@ function fetchOpenMeteo(lat: number, lon: number): void {
     const reading = status === 200 ? parseOpenMeteo(parseJson(text)) : null;
     if (reading) {
       sendWeather(reading);
+      noteStatus("weather", true, reading.tenthsC / 10 + " °C (" + where + ")");
     } else {
       console.log(LOG + "Open-Meteo failed (" + status + ")");
+      noteStatus("weather", false, status === 0 ? "Open-Meteo not reachable" : "Open-Meteo answered " + status);
     }
   });
 }
@@ -296,11 +311,11 @@ function withHaToken(cb: (token: string | null) => void, forceRefresh?: boolean)
 }
 
 /** GET a Home Assistant API path as JSON, retrying once with a fresh token on 401. */
-function haGet(path: string, cb: (data: unknown) => void): void {
+function haGet(path: string, cb: (data: unknown, status: number) => void): void {
   const url = localStorage.getItem("haUrl") || "";
   const attempt = function (token: string | null, retry: boolean) {
     if (!url || !token) {
-      cb(null);
+      cb(null, 401);
       return;
     }
     request("GET", url + path, { Authorization: "Bearer " + token }, null, function (status, text) {
@@ -310,7 +325,7 @@ function haGet(path: string, cb: (data: unknown) => void): void {
         }, true);
         return;
       }
-      cb(status === 200 ? parseJson(text) : null);
+      cb(status === 200 ? parseJson(text) : null, status);
     });
   };
   withHaToken(function (token) {
@@ -380,15 +395,27 @@ function haTempActive(): boolean {
 function refreshHaTemp(): void {
   if (!haTempActive()) return;
   const entity = loadSettings().haEntity;
-  haGet("/api/states/" + encodeURIComponent(entity), function (data) {
+  haGet("/api/states/" + encodeURIComponent(entity), function (data, status) {
     const tenths = parseHaTemp(data as HaStateObject | null);
     if (tenths === null) {
       // The watch keeps the last value and hides it once it is 3 hours old.
-      console.log(LOG + "no Home Assistant temperature from " + entity);
+      console.log(LOG + "no Home Assistant temperature from " + entity + " (" + status + ")");
+      noteStatus(
+        "ha",
+        false,
+        status === 0
+          ? "Home Assistant not reachable"
+          : status === 401
+            ? "login expired, connect again"
+            : status === 200
+              ? entity + " has no temperature right now"
+              : "Home Assistant answered " + status,
+      );
       return;
     }
     console.log(LOG + "Home Assistant " + entity + " " + tenths / 10 + "°C");
     sendHaTemp(tenths);
+    noteStatus("ha", true, tenths / 10 + " °C from " + entity);
   });
 }
 
@@ -408,6 +435,7 @@ function openConfig(): void {
     fahrenheit: s.fahrenheit,
     stepGoal: s.stepGoal,
     vibe: s.vibe,
+    status: parseJson(localStorage.getItem("status") || "{}") || {},
     ha: {
       connected: haConnected(),
       url: localStorage.getItem("haUrl") || localStorage.getItem("haLastUrl") || "",
@@ -519,7 +547,10 @@ Pebble.addEventListener("ready", function () {
 });
 
 Pebble.addEventListener("appmessage", function (e) {
-  if (e && e.payload && e.payload.REFRESH !== undefined) refreshWeather();
+  if (e && e.payload && e.payload.REFRESH !== undefined) {
+    noteStatus("watch", true, "asked for new data");
+    refreshWeather();
+  }
 });
 
 Pebble.addEventListener("showConfiguration", function () {

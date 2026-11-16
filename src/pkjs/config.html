@@ -90,6 +90,8 @@
   }
   .status { font-weight: 600; margin: 4px 0 10px; word-break: break-all; }
   .hidden { display: none; }
+  .status-line { margin: 6px 0; font-size: 14px; }
+  .status-line.bad { color: var(--red); }
   .picker { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; margin-top: 4px;
             background: #fff; border: 3px solid var(--ink); box-shadow: 4px 4px 0 var(--ink); font: inherit; color: var(--ink); cursor: pointer; }
   .picker::after { content: "▾"; font-size: 18px; }
@@ -217,6 +219,12 @@
       <input type="number" id="goal" min="500" max="100000" step="500" inputmode="numeric">
     </div>
     <p class="hint">The five red segments fill up as you walk; they turn green at the goal.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Status</h2>
+    <div id="status"></div>
+    <p class="hint">The watch asks the phone for new data every 30 minutes, and every 5 minutes while an answer is overdue.</p>
   </div>
 
   <button class="btn save" id="save" type="button">Save!</button>
@@ -543,6 +551,28 @@
       }
     });
   });
+
+  // --- Status: what the phone side did last (src/pkjs/index.ts noteStatus) --
+  function ago(at) {
+    var min = Math.round((Date.now() - at) / 60000);
+    if (min < 1) return 'just now';
+    if (min < 60) return min + ' min ago';
+    var h = Math.floor(min / 60);
+    return h < 24 ? h + ' h ' + (min % 60) + ' min ago' : Math.floor(h / 24) + ' days ago';
+  }
+  (function renderStatus() {
+    var st = config.status || {};
+    var rows = [['watch', 'Watch asked'], ['weather', 'Weather']];
+    if (config.ha.connected && config.ha.entity) rows.push(['ha', 'Home Assistant']);
+    var box = $('status');
+    rows.forEach(function (r) {
+      var item = st[r[0]];
+      var line = el('p', 'status-line' + (item && !item.ok ? ' bad' : ''));
+      line.appendChild(el('b', '', r[1] + ': '));
+      line.appendChild(document.createTextNode(item ? ago(item.at) + (item.msg && r[0] !== 'watch' ? ', ' + item.msg : '') : 'not yet'));
+      box.appendChild(line);
+    });
+  })();
 
   $('save').addEventListener('click', function () {
     close({ action: 'save', settings: settings(), haDisconnect: disconnectRequested });

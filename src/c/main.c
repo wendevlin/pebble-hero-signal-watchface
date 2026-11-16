@@ -20,6 +20,10 @@
 #define WEATHER_MAX_AGE_S (3 * 60 * 60)
 // The watch asks the phone for fresh weather every N minutes and on reconnect.
 #define REFRESH_EVERY_MIN 30
+// When an answer is overdue (a request got lost, e.g. while the phone app was
+// starting, or the phone was asleep), ask again every few minutes for a while.
+#define RETRY_EVERY_MIN 5
+#define RETRY_AFTER_S ((REFRESH_EVERY_MIN + 5) * 60)
 
 enum {
   P_TEMP = 1,
@@ -190,7 +194,10 @@ static void tick_handler(struct tm *tick_time, TimeUnits units_changed) {
   s_scene.now = *tick_time;
   refresh_weather_validity();
   layer_mark_dirty(s_layer);
-  if (tick_time->tm_min % REFRESH_EVERY_MIN == 0) request_refresh();
+  const int min = tick_time->tm_min;
+  const time_t age = time(NULL) - s_weather_time;
+  const bool overdue = s_weather_time == 0 || (age > RETRY_AFTER_S && age < WEATHER_MAX_AGE_S);
+  if (min % REFRESH_EVERY_MIN == 0 || (overdue && min % RETRY_EVERY_MIN == 0)) request_refresh();
 }
 
 static void battery_handler(BatteryChargeState state) {
